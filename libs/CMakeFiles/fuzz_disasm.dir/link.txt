@@ -1,0 +1,1 @@
+/home/dan/emsdk/upstream/emscripten/emcc -s EXPORTED_RUNTIME_METHODS=FS -s FORCE_FILESYSTEM=1 -s MODULARIZE=1 -s EXPORT_NAME=createCstool -O3 -DNDEBUG   @CMakeFiles/fuzz_disasm.dir/objects1.rsp  -o fuzz_disasm.js 

@@ -1,0 +1,12 @@
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/install/strip.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/install/local.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/edit_cache.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/install.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/list_install_components.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/rebuild_cache.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/package.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/UNINSTALL.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/fuzz_disasm.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/capstone_static.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/package_source.dir
+/home/dan/master_thesis/cap/libs/build-capstone/CMakeFiles/capstone.dir

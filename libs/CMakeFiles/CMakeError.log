@@ -1,0 +1,46 @@
+The C compiler identification could not be found in "/home/dan/master_thesis/cap/libs/CMakeFiles/3.16.3/CompilerIdC/a.out.js"
+
+The CXX compiler identification could not be found in "/home/dan/master_thesis/cap/libs/CMakeFiles/3.16.3/CompilerIdCXX/a.out.js"
+
+Performing C SOURCE FILE Test SUPPORTS_MU failed with the following output:
+Change Dir: /home/dan/master_thesis/cap/libs/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/make cmTC_3637a/fast && /usr/bin/make -f CMakeFiles/cmTC_3637a.dir/build.make CMakeFiles/cmTC_3637a.dir/build
+make[1]: Entering directory '/home/dan/master_thesis/cap/libs/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_3637a.dir/src.c.o
+/home/dan/emsdk/upstream/emscripten/emcc   -s EXPORTED_RUNTIME_METHODS=FS -s FORCE_FILESYSTEM=1 -s MODULARIZE=1 -s EXPORT_NAME=createCstool -DSUPPORTS_MU   -Wno-maybe-uninitialized -o CMakeFiles/cmTC_3637a.dir/src.c.o   -c /home/dan/master_thesis/cap/libs/CMakeFiles/CMakeTmp/src.c
+emcc: warning: linker setting ignored during compilation: 'EXPORTED_RUNTIME_METHODS' [-Wunused-command-line-argument]
+emcc: warning: linker setting ignored during compilation: 'FORCE_FILESYSTEM' [-Wunused-command-line-argument]
+emcc: warning: linker setting ignored during compilation: 'MODULARIZE' [-Wunused-command-line-argument]
+emcc: warning: linker setting ignored during compilation: 'EXPORT_NAME' [-Wunused-command-line-argument]
+warning: unknown warning option '-Wno-maybe-uninitialized'; did you mean '-Wno-uninitialized'? [-Wunknown-warning-option]
+1 warning generated.
+Linking C executable cmTC_3637a.js
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_3637a.dir/link.txt --verbose=1
+/home/dan/emsdk/upstream/emscripten/emcc -s EXPORTED_RUNTIME_METHODS=FS -s FORCE_FILESYSTEM=1 -s MODULARIZE=1 -s EXPORT_NAME=createCstool -DSUPPORTS_MU    @CMakeFiles/cmTC_3637a.dir/objects1.rsp  -o cmTC_3637a.js 
+make[1]: Leaving directory '/home/dan/master_thesis/cap/libs/CMakeFiles/CMakeTmp'
+
+
+Source file was:
+int main(void) { return 0; }
+Performing C SOURCE FILE Test SUPPORTS_SHADOWING failed with the following output:
+Change Dir: /home/dan/master_thesis/cap/libs/CMakeFiles/CMakeTmp
+
+Run Build Command(s):/usr/bin/make cmTC_43fd0/fast && /usr/bin/make -f CMakeFiles/cmTC_43fd0.dir/build.make CMakeFiles/cmTC_43fd0.dir/build
+make[1]: Entering directory '/home/dan/master_thesis/cap/libs/CMakeFiles/CMakeTmp'
+Building C object CMakeFiles/cmTC_43fd0.dir/src.c.o
+/home/dan/emsdk/upstream/emscripten/emcc   -s EXPORTED_RUNTIME_METHODS=FS -s FORCE_FILESYSTEM=1 -s MODULARIZE=1 -s EXPORT_NAME=createCstool -DSUPPORTS_SHADOWING   -Wshadow=local -o CMakeFiles/cmTC_43fd0.dir/src.c.o   -c /home/dan/master_thesis/cap/libs/CMakeFiles/CMakeTmp/src.c
+emcc: warning: linker setting ignored during compilation: 'EXPORTED_RUNTIME_METHODS' [-Wunused-command-line-argument]
+emcc: warning: linker setting ignored during compilation: 'FORCE_FILESYSTEM' [-Wunused-command-line-argument]
+emcc: warning: linker setting ignored during compilation: 'MODULARIZE' [-Wunused-command-line-argument]
+emcc: warning: linker setting ignored during compilation: 'EXPORT_NAME' [-Wunused-command-line-argument]
+warning: unknown warning option '-Wshadow=local' [-Wunknown-warning-option]
+1 warning generated.
+Linking C executable cmTC_43fd0.js
+/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_43fd0.dir/link.txt --verbose=1
+/home/dan/emsdk/upstream/emscripten/emcc -s EXPORTED_RUNTIME_METHODS=FS -s FORCE_FILESYSTEM=1 -s MODULARIZE=1 -s EXPORT_NAME=createCstool -DSUPPORTS_SHADOWING    @CMakeFiles/cmTC_43fd0.dir/objects1.rsp  -o cmTC_43fd0.js 
+make[1]: Leaving directory '/home/dan/master_thesis/cap/libs/CMakeFiles/CMakeTmp'
+
+
+Source file was:
+int main(void) { return 0; }

@@ -1,0 +1,20 @@
+if(NOT EXISTS "/home/dan/master_thesis/cap/libs/build-capstone/install_manifest.txt")
+  message(FATAL_ERROR "Cannot find install manifest: /home/dan/master_thesis/cap/libs/build-capstone/install_manifest.txt")
+endif()
+
+file(READ "/home/dan/master_thesis/cap/libs/build-capstone/install_manifest.txt" files)
+string(REGEX REPLACE "\n" ";" files "${files}")
+foreach(file ${files})
+  message(STATUS "Uninstalling $ENV{DESTDIR}${file}")
+  if(IS_SYMLINK "$ENV{DESTDIR}${file}" OR EXISTS "$ENV{DESTDIR}${file}")
+    file(REMOVE_RECURSE $ENV{DESTDIR}${file})
+  else(IS_SYMLINK "$ENV{DESTDIR}${file}" OR EXISTS "$ENV{DESTDIR}${file}")
+    message(STATUS "File $ENV{DESTDIR}${file} does not exist.")
+  endif()
+endforeach()
+
+message(STATUS "Uninstalling ${PACKAGE_PREFIX_DIR}/include/capstone")
+file(REMOVE_RECURSE ${PACKAGE_PREFIX_DIR}/include/capstone)
+
+message(STATUS "Uninstalling ${PACKAGE_PREFIX_DIR}/lib/cmake/capstone")
+file(REMOVE_RECURSE ${PACKAGE_PREFIX_DIR}/lib/cmake/capstone)
