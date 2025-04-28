@@ -3,95 +3,121 @@
 <head>
   <meta charset="UTF-8">
   <title>WASM C Compiler & Disassembler</title>
+  <style>
+    #editor { 
+      width: 600px; 
+      height: 200px; 
+      border: 1px solid #ccc; 
+      margin-bottom: 8px;
+    }
+  </style>
+  <!-- 1) Load Monaco’s AMD loader -->
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs/loader.js"></script>
 </head>
 <body>
   <h2>1. Enter C Code</h2>
-  <textarea id="cInput" rows="10" cols="60">
+  <div id="editor">// Type your C code here…
 int test(int a, int b) {
   return a + b;
 }
-  </textarea><br>
+  </div>
   <button onclick="compileToHex()">Compile to Hex</button>
 
   <h2>2. Compiled Hex</h2>
-  <pre id="hexOutput">Waiting for compilation...</pre>
+  <pre id="hexOutput">Waiting for compilation…</pre>
   <button onclick="runDisasm()">Disassemble Hex</button>
 
   <h2>3. Disassembled Output</h2>
-  <pre id="output">Loading modules...</pre>
+  <pre id="output">Loading modules…</pre>
 
-  <!-- adjust these paths if your folders differ -->
+  <!-- your prebuilt wasm+js bundles -->
   <script src="../libs/build-wrapper/capstone.js"></script>
   <script src="../libs/build-tcc/tcc.js"></script>
+
   <script>
-    let capstoneModule, tccModule, disasmFunc;
+    // 2) Tell Monaco where to find its files
+    require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs' }});
+
+    let editor, capstoneModule, tccModule, disasmFunc;
+
+    // 3) Bootstrap Monaco and then TinyCC/Capstone
+    require(['vs/editor/editor.main'], () => {
+      editor = monaco.editor.create(document.getElementById('editor'), {
+        value: [
+          '// Type your C code here…',
+          'int test(int a, int b) {',
+          '  return a + b;',
+          '}'
+        ].join('\n'),
+        language: 'c',
+        theme: 'vs-light',
+        automaticLayout: true
+      });
+
+      initModules();
+    });
 
     async function initModules() {
+      // Capstone
       capstoneModule = await createCapstoneModule({
         print:    txt => output(txt),
-        printErr: txt => output("[cap err] "+txt)
+        printErr: txt => output('[cap err] ' + txt)
       });
-      disasmFunc = capstoneModule.cwrap("disasm_x86", null, ["array","number"]);
-      output("✅ Capstone loaded.");
+      disasmFunc = capstoneModule.cwrap('disasm_x86', null, ['array','number']);
+      output('✅ Capstone loaded.');
 
+      // TinyCC
       tccModule = await createTCC({
         locateFile: path => {
-          if (path.endsWith(".wasm")||path.endsWith(".data")) 
-            return "../libs/build-tcc/"+path;
+          if (path.endsWith('.wasm') || path.endsWith('.data')) {
+            return '../libs/build-tcc/' + path;
+          }
           return path;
         },
-        print:    txt => console.log("[tcc] "+txt),
-        printErr: txt => console.error("[tcc err] "+txt)
+        print:    txt => console.log('[tcc] ' + txt),
+        printErr: txt => console.error('[tcc err] ' + txt)
       });
-      document.getElementById("hexOutput").textContent =
-        "✅ TinyCC loaded. Ready to compile.";
-      console.log("TinyCC ready");
+      document.getElementById('hexOutput').textContent = '✅ TinyCC loaded.';
+      console.log('TinyCC ready.');
     }
 
     function output(txt) {
-      let o = document.getElementById("output");
-      o.textContent += txt+"\n";
+      const o = document.getElementById('output');
+      o.textContent += txt + '\n';
     }
 
     window.compileToHex = () => {
-      let code = document.getElementById("cInput").value;
-      if (!tccModule) return alert("TinyCC not yet loaded");
-      tccModule.FS.writeFile("input.c", code);
+      if (!tccModule) return alert('TinyCC not yet loaded');
 
-      let lenPtr = tccModule._malloc(4);
-      let compileFn = tccModule.cwrap(
-        "compile_and_get_text","number",["string","number"]
-      );
-      let ptr  = compileFn("input.c", lenPtr);
-      let size = tccModule.HEAP32[lenPtr>>2];
+      // grab code from Monaco instead of textarea
+      const code = editor.getValue();
+      tccModule.FS.writeFile('input.c', code);
+
+      const lenPtr = tccModule._malloc(4);
+      const compileFn = tccModule.cwrap('compile_and_get_text', 'number', ['string','number']);
+      const ptr  = compileFn('input.c', lenPtr);
+      const size = tccModule.HEAP32[lenPtr >> 2];
       tccModule._free(lenPtr);
 
-      if (!ptr||!size) {
-        return document.getElementById("hexOutput").textContent =
-          "❌ Compile failed or no .text section.";
+      if (!ptr || !size) {
+        document.getElementById('hexOutput').textContent = '❌ Compile failed or no .text section.';
+        return;
       }
 
-      let bytes = new Uint8Array(
-        tccModule.HEAPU8.buffer, ptr, size
-      );
-      document.getElementById("hexOutput").textContent =
-        [...bytes].map(b=>b.toString(16).padStart(2,"0")).join(" ");
+      const bytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
+      document.getElementById('hexOutput').textContent =
+        [...bytes].map(b => b.toString(16).padStart(2,'0')).join(' ');
       window.lastCompiledBytes = bytes;
     };
 
     window.runDisasm = () => {
       const buf = window.lastCompiledBytes;
       if (!disasmFunc || !buf) {
-        return alert("Missing Capstone or compiled bytes");
+        return alert('Missing Capstone or compiled bytes');
       }
-      // clear & start output
-      document.getElementById("output").textContent = "Disassembling…\n";
-      // Emscripten will malloc+copy automatically for you
+      document.getElementById('output').textContent = 'Disassembling…\n';
       disasmFunc(buf, buf.length);
     };
-
-
-    initModules();
   </script>
 </body>
 </html>
