@@ -161,15 +161,31 @@
       setTimeout(() => {
         const code = editor.getValue();
         tccModule.FS.writeFile('input.c', code);
+
         const lenPtr = tccModule._malloc(4);
         const ptr = tccModule.cwrap('compile_and_get_text', 'number', ['string', 'number'])('input.c', lenPtr);
         const size = tccModule.HEAP32[lenPtr >> 2];
         tccModule._free(lenPtr);
-        if (!ptr || !size) return hexEditor.setValue(current + '\n❌ Compile failed.');
+
+        if (!ptr || !size) {
+          hexEditor.setValue(current + '\n❌ Compile failed.');
+          return;
+        }
+
         const bytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
         hexEditor.setValue(current + '\n' + formatHex(bytes) + '\n✅ Compilation finished.');
         hexEditor.revealLine(hexEditor.getModel().getLineCount());
         window.lastCompiledBytes = bytes;
+
+        const extractSymbols = tccModule.cwrap('extract_symbols', 'string', ['string']);
+        const symbolJSON = extractSymbols('out.o');
+        try {
+          window.symbolMap = JSON.parse(symbolJSON);
+          console.log('📍 Function symbols:', window.symbolMap);
+        } catch (err) {
+          console.error('❌ Failed to parse symbol map:', err, symbolJSON);
+        }
+
         callback?.();
       }, 1000);
     }
@@ -232,8 +248,27 @@
     function appendDisasm(txt) {
       const current = asmEditor.getValue();
       const newLine = txt.trim();
+
+      const match = /^0x([0-9a-f]+):/.exec(newLine);
+      let labelLine = '';
+
+      if (match && window.symbolMap) {
+        const addr = parseInt(match[1], 16);
+        for (const [name, symAddr] of Object.entries(window.symbolMap)) {
+          if (symAddr === addr) {
+            labelLine = `${name}:`;
+            break;
+          }
+        }
+      }
+
       if (!current.includes(newLine)) {
-        asmEditor.setValue(current + '\n' + newLine);
+        let updated = current;
+        if (labelLine && !current.includes(labelLine)) {
+          updated += '\n' + labelLine;
+        }
+        updated += '\n' + newLine;
+        asmEditor.setValue(updated);
         asmEditor.revealLine(asmEditor.getModel().getLineCount());
       }
     }
