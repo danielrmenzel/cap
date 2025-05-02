@@ -1,123 +1,253 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>WASM C Compiler & Disassembler</title>
   <style>
-    #editor { 
-      width: 600px; 
-      height: 200px; 
-      border: 1px solid #ccc; 
-      margin-bottom: 8px;
+    html, body {
+      height: 100%; margin: 0; padding: 0;
+      background: #8a8a8a;
+      box-sizing: border-box;
+      font-family: sans-serif;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+      gap: 12px;
+    }
+    .editor-container {
+      height: 200px;
+      border: 1px solid #ccc;
+      resize: vertical;
+      overflow: hidden;
+    }
+    .monaco-editor-instance {
+      width: 100%; height: 100%;
+    }
+    .breakpoint-glyph {
+      background-color: rgb(116, 0, 0);
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-left: 6px;
+      display: inline-block;
+      box-sizing: content-box;
+      transform: translateY(4px);
+    }
+    .step-highlight {
+      background-color: rgba(0, 255, 0, 0.2);
+    }
+    .button-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    button {
+      background: #444444;
+      padding: 6px 12px;
+      font-size: 14px;
+      color: #f9f9f9;
     }
   </style>
-  <!-- 1) Load Monaco’s AMD loader -->
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs/loader.js"></script>
 </head>
 <body>
   <h2>1. Enter C Code</h2>
-  <div id="editor">// Type your C code here…
-int test(int a, int b) {
-  return a + b;
-}
+  <div class="editor-container">
+    <div id="editor" class="monaco-editor-instance"></div>
   </div>
-  <button onclick="compileToHex()">Compile to Hex</button>
+  <div class="button-row">
+    <button onclick="compileAndDisasm()">Compile</button>
+    <button onclick="debugFromBreakpoint()">Debug</button>
+    <button onclick="resetStepper()">↺ Reset</button>
+  </div>
 
-  <h2>2. Compiled Hex</h2>
-  <pre id="hexOutput">Waiting for compilation…</pre>
-  <button onclick="runDisasm()">Disassemble Hex</button>
+  <h2>2. Compiled Hex Output</h2>
+  <div class="editor-container" style="height: 100px; resize: vertical;">
+    <div id="hex-editor" class="monaco-editor-instance"></div>
+  </div>
 
   <h2>3. Disassembled Output</h2>
-  <pre id="output">Loading modules…</pre>
+  <div class="editor-container" style="height: 100px; resize: vertical;">
+    <div id="asm-editor" class="monaco-editor-instance"></div>
+  </div>
 
-  <!-- your prebuilt wasm+js bundles -->
   <script src="../libs/build-wrapper/capstone.js"></script>
   <script src="../libs/build-tcc/tcc.js"></script>
 
   <script>
-    // 2) Tell Monaco where to find its files
-    require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs' }});
+    require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs' } });
+    let editor, hexEditor, asmEditor;
+    let capstoneModule, tccModule, disasmFunc;
+    let breakpoints = new Set();
+    let breakpointDecorations = [];
+    let currentStepLine = 1;
+    let stepMarker = [];
+    let lastDisasmContent = '';
 
-    let editor, capstoneModule, tccModule, disasmFunc;
-
-    // 3) Bootstrap Monaco and then TinyCC/Capstone
     require(['vs/editor/editor.main'], () => {
       editor = monaco.editor.create(document.getElementById('editor'), {
         value: [
-          '// Type your C code here…',
           'int test(int a, int b) {',
+          '  int x = 4;',
+          '  x++;',
           '  return a + b;',
           '}'
         ].join('\n'),
         language: 'c',
-        theme: 'vs-light',
-        automaticLayout: true
+        theme: 'vs-dark',
+        automaticLayout: true,
+        glyphMargin: true
+      });
+
+      editor.onMouseDown(e => {
+        if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
+          const line = e.target.position.lineNumber;
+          e.event.rightButton ? breakpoints.delete(line)
+                              : breakpoints.has(line) ? breakpoints.delete(line) : breakpoints.add(line);
+          updateBreakpoints();
+        }
+      });
+
+      function updateBreakpoints() {
+        breakpointDecorations = editor.deltaDecorations(
+          breakpointDecorations,
+          [...breakpoints].map(line => ({
+            range: new monaco.Range(line, 1, line, 1),
+            options: {
+              isWholeLine: false,
+              glyphMarginClassName: 'breakpoint-glyph',
+              glyphMarginHoverMessage: { value: '⛔ Breakpoint' }
+            }
+          }))
+        );
+      }
+
+      hexEditor = monaco.editor.create(document.getElementById('hex-editor'), {
+        value: '', language: 'plaintext', readOnly: true, theme: 'vs-dark', wordWrap: 'on', lineNumbers: 'off',
+        fontFamily: 'Courier New', fontSize: 14
+      });
+
+      asmEditor = monaco.editor.create(document.getElementById('asm-editor'), {
+        value: 'Loading modules…', language: 'plaintext', readOnly: true,
+        theme: 'vs-dark', wordWrap: 'on', lineNumbers: 'off'
       });
 
       initModules();
     });
 
     async function initModules() {
-      // Capstone
       capstoneModule = await createCapstoneModule({
-        print:    txt => output(txt),
-        printErr: txt => output('[cap err] ' + txt)
+        print: txt => appendDisasm(txt), printErr: txt => appendDisasm('[cap err] ' + txt)
       });
-      disasmFunc = capstoneModule.cwrap('disasm_x86', null, ['array','number']);
-      output('✅ Capstone loaded.');
+      disasmFunc = capstoneModule.cwrap('disasm_x86', null, ['array', 'number']);
+      appendDisasm('✅ Capstone loaded.');
 
-      // TinyCC
       tccModule = await createTCC({
-        locateFile: path => {
-          if (path.endsWith('.wasm') || path.endsWith('.data')) {
-            return '../libs/build-tcc/' + path;
-          }
-          return path;
-        },
-        print:    txt => console.log('[tcc] ' + txt),
+        locateFile: path => path.endsWith('.wasm') || path.endsWith('.data') ? '../libs/build-tcc/' + path : path,
+        print: txt => console.log('[tcc] ' + txt),
         printErr: txt => console.error('[tcc err] ' + txt)
       });
-      document.getElementById('hexOutput').textContent = '✅ TinyCC loaded.';
-      console.log('TinyCC ready.');
+      hexEditor.setValue('✅ TinyCC loaded.\n⏳Waiting for compilation…');
     }
 
-    function output(txt) {
-      const o = document.getElementById('output');
-      o.textContent += txt + '\n';
+    function compileAndDisasm() {
+      compileToHex(() => runDisasm());
     }
 
-    window.compileToHex = () => {
-      if (!tccModule) return alert('TinyCC not yet loaded');
+    function compileToHex(callback) {
+      const current = hexEditor.getValue();
+      hexEditor.setValue(current + '\n🛠️ Compiling...');
+      setTimeout(() => {
+        const code = editor.getValue();
+        tccModule.FS.writeFile('input.c', code);
+        const lenPtr = tccModule._malloc(4);
+        const ptr = tccModule.cwrap('compile_and_get_text', 'number', ['string', 'number'])('input.c', lenPtr);
+        const size = tccModule.HEAP32[lenPtr >> 2];
+        tccModule._free(lenPtr);
+        if (!ptr || !size) return hexEditor.setValue(current + '\n❌ Compile failed.');
+        const bytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
+        hexEditor.setValue(current + '\n' + formatHex(bytes) + '\n✅ Compilation finished.');
+        hexEditor.revealLine(hexEditor.getModel().getLineCount());
+        window.lastCompiledBytes = bytes;
+        callback?.();
+      }, 1000);
+    }
 
-      // grab code from Monaco instead of textarea
-      const code = editor.getValue();
-      tccModule.FS.writeFile('input.c', code);
+    function debugFromBreakpoint() {
+      const bpLine = breakpoints.size > 0 ? Math.min(...breakpoints) : currentStepLine;
+      highlightLine(bpLine);
+      const allLines = editor.getValue().split('\n');
+      const debugLines = allLines.slice(0, bpLine);
+      const balancedLines = balanceBraces(debugLines);
+      const code = balancedLines.join('\n');
+      tccModule.FS.writeFile('debug_input.c', code + '\n');
 
       const lenPtr = tccModule._malloc(4);
-      const compileFn = tccModule.cwrap('compile_and_get_text', 'number', ['string','number']);
-      const ptr  = compileFn('input.c', lenPtr);
+      const ptr = tccModule.cwrap('compile_and_get_text', 'number', ['string', 'number'])('debug_input.c', lenPtr);
       const size = tccModule.HEAP32[lenPtr >> 2];
       tccModule._free(lenPtr);
+      if (!ptr || !size) return appendDisasm('\n❌ Debug compile failed.');
+      window.lastCompiledBytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
+      appendDisasm(`\n🧠 Debugging line ${bpLine}...`);
+      runDisasm();
+      currentStepLine = bpLine + 1;
+    }
 
-      if (!ptr || !size) {
-        document.getElementById('hexOutput').textContent = '❌ Compile failed or no .text section.';
-        return;
+    function balanceBraces(lines) {
+      let open = 0, close = 0;
+      for (const line of lines) {
+        open += (line.match(/{/g) || []).length;
+        close += (line.match(/}/g) || []).length;
       }
+      while (close < open) {
+        lines.push('}');
+        close++;
+      }
+      return lines;
+    }
 
-      const bytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
-      document.getElementById('hexOutput').textContent =
-        [...bytes].map(b => b.toString(16).padStart(2,'0')).join(' ');
-      window.lastCompiledBytes = bytes;
-    };
+    function resetStepper() {
+      currentStepLine = 1;
+      highlightLine(null);
+      stepMarker = editor.deltaDecorations(stepMarker, []);
+      asmEditor.setValue('↺ Stepper reset.');
+      hexEditor.setValue('↺ Reset complete.\n⏳Waiting for compilation…');
+      lastDisasmContent = '';
+    }
 
-    window.runDisasm = () => {
+    function highlightLine(line) {
+      stepMarker = editor.deltaDecorations(stepMarker, line ? [{
+        range: new monaco.Range(line, 1, line, 1),
+        options: { isWholeLine: true, className: 'step-highlight' }
+      }] : []);
+    }
+
+    function runDisasm() {
       const buf = window.lastCompiledBytes;
-      if (!disasmFunc || !buf) {
-        return alert('Missing Capstone or compiled bytes');
-      }
-      document.getElementById('output').textContent = 'Disassembling…\n';
+      if (!disasmFunc || !buf) return alert('Missing Capstone or compiled bytes');
       disasmFunc(buf, buf.length);
-    };
+    }
+
+    function appendDisasm(txt) {
+      const current = asmEditor.getValue();
+      const newLine = txt.trim();
+      if (!current.includes(newLine)) {
+        asmEditor.setValue(current + '\n' + newLine);
+        asmEditor.revealLine(asmEditor.getModel().getLineCount());
+      }
+    }
+
+    function formatHex(bytes) {
+      const lines = [];
+      for (let i = 0; i < bytes.length; i += 16) {
+        const chunk = bytes.slice(i, i + 16);
+        const hexLine = chunk.map(b => b.toString(16).padStart(2, '0')).join(' ');
+        const offset = i.toString(16).padStart(4, '0');
+        lines.push(`${offset}: ${hexLine}`);
+      }
+      return lines.join('\n');
+    }
   </script>
 </body>
 </html>
