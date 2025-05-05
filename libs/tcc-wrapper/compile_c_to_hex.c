@@ -10,6 +10,8 @@
 #define STT_FUNC 2
 #define ELF64_ST_TYPE(val) ((val) & 0xf)
 
+static uint64_t g_text_base = 0;
+
 typedef struct {
     unsigned char e_ident[EI_NIDENT];
     uint16_t e_type;
@@ -53,26 +55,41 @@ EMSCRIPTEN_KEEPALIVE
 uint8_t* compile_and_get_text(const char* source_path, int* out_size) {
     fprintf(stderr, "[TCC] Creating compiler state...\n");
     TCCState *s = tcc_new();
-    if (!s) { fprintf(stderr, "[TCC] tcc_new failed\n"); return NULL; }
+    if (!s) {
+        fprintf(stderr, "[TCC] tcc_new failed\n");
+        return NULL;
+    }
+
     tcc_set_output_type(s, TCC_OUTPUT_OBJ);
     tcc_add_include_path(s, "/");
     tcc_add_include_path(s, "/tinycc-headers");
+
+    // 🛠️ Set base address for .text section
+    //tcc_set_section_address(s, ".text", 0x1000);
+
     fprintf(stderr, "[TCC] Adding source file: %s\n", source_path);
     if (tcc_add_file(s, source_path) < 0) {
         fprintf(stderr, "[TCC] Failed to compile %s\n", source_path);
         tcc_delete(s);
         return NULL;
     }
+
     fprintf(stderr, "[TCC] Writing output object file...\n");
     if (tcc_output_file(s, "out.o") < 0) {
         fprintf(stderr, "[TCC] Failed to write out.o\n");
         tcc_delete(s);
         return NULL;
     }
+
     tcc_delete(s);
 
+    // ✅ Read back ELF file and extract .text
     FILE *f = fopen("out.o", "rb");
-    if (!f) { fprintf(stderr, "[TCC] fopen(out.o) failed\n"); return NULL; }
+    if (!f) {
+        fprintf(stderr, "[TCC] fopen(out.o) failed\n");
+        return NULL;
+    }
+
     fseek(f, 0, SEEK_END);
     long file_size = ftell(f);
     rewind(f);
@@ -92,6 +109,10 @@ uint8_t* compile_and_get_text(const char* source_path, int* out_size) {
             uint8_t *out = malloc(sz);
             memcpy(out, elf + sh[i].sh_offset, sz);
             *out_size = sz;
+            g_text_base = sh[i].sh_addr;
+            if (g_text_base == 0) g_text_base = 0x1000;
+
+            fprintf(stderr, "[TCC] .text virtual address: 0x%llx\n", (unsigned long long)g_text_base);
             free(elf);
             return out;
         }
@@ -100,6 +121,12 @@ uint8_t* compile_and_get_text(const char* source_path, int* out_size) {
     fprintf(stderr, "[TCC] No .text* section found\n");
     free(elf);
     return NULL;
+}
+
+
+EMSCRIPTEN_KEEPALIVE
+uint64_t get_text_base() {
+    return g_text_base;
 }
 
 EMSCRIPTEN_KEEPALIVE
@@ -122,13 +149,10 @@ char* extract_symbols(const char* obj_path) {
     const char* sh_strtab = (const char*)(elf + sh[eh->e_shstrndx].sh_offset);
 
     Elf64_Shdr *symtab = NULL, *strtab = NULL;
-    uint64_t text_vaddr = 0;
-
     for (int i = 0; i < eh->e_shnum; i++) {
         const char* name = sh_strtab + sh[i].sh_name;
         if (strcmp(name, ".symtab") == 0) symtab = &sh[i];
         else if (strcmp(name, ".strtab") == 0) strtab = &sh[i];
-        else if (strncmp(name, ".text", 5) == 0) text_vaddr = sh[i].sh_addr;
     }
 
     if (!symtab || !strtab) {
@@ -158,7 +182,9 @@ char* extract_symbols(const char* obj_path) {
             const char* name = strtab_data + symbols[i].st_name;
             if (wrote++ > 0) strcat(out, ",");
             char buf[128];
-            snprintf(buf, sizeof(buf), "\"%s\":%llu", name, (unsigned long long)(symbols[i].st_value + text_vaddr));
+            // snprintf(buf, sizeof(buf), "\"%s\":\"%llu\"", name, (unsigned long long)symbols[i].st_value);
+
+            snprintf(buf, sizeof(buf), "\"%s\":%llu", name, (unsigned long long)symbols[i].st_value);
             strcat(out, buf);
         }
     }

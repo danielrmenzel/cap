@@ -2,286 +2,376 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>WASM C Compiler & Disassembler</title>
+  <title>WASM C Compiler &amp; Disassembler</title>
+
+  <!-- CodeMirror CSS (base + theme) -->
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css" />
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/dracula.min.css" />
+
+  <!-- CodeMirror JS Core & Modes -->
+  <script
+    src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
+  <script
+    src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/clike/clike.min.js"></script>
+
   <style>
     html, body {
       height: 100%; margin: 0; padding: 0;
-      background: #8a8a8a;
-      box-sizing: border-box;
-      font-family: sans-serif;
+      background: #8a8a8a; font-family: sans-serif;
     }
     body {
-      display: flex;
-      flex-direction: column;
-      padding: 16px;
-      gap: 12px;
+      display: flex; flex-direction: column; padding: 16px; gap: 12px;
     }
     .editor-container {
-      height: 200px;
-      border: 1px solid #ccc;
-      resize: vertical;
-      overflow: hidden;
+      height: 200px; border: 1px solid #ccc; resize: vertical; overflow: hidden;
     }
-    .monaco-editor-instance {
-      width: 100%; height: 100%;
-    }
-    .breakpoint-glyph {
-      background-color: rgb(116, 0, 0);
-      width: 8px; height: 8px;
-      border-radius: 50%;
-      margin-left: 6px;
-      display: inline-block;
-      box-sizing: content-box;
-      transform: translateY(4px);
+    .CodeMirror {
+      width: 100%; height: 100%; font-family: monospace; font-size: 14px;
     }
     .step-highlight {
-      background-color: rgba(0, 255, 0, 0.2);
+      background-color: rgba(0, 255, 0, 0.2) !important;
     }
     .button-row {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
+      display: flex; gap: 8px; flex-wrap: wrap;
     }
     button {
-      background: #444444;
-      padding: 6px 12px;
-      font-size: 14px;
-      color: #f9f9f9;
+      background: #444; padding: 6px 12px; font-size: 14px; color: #f9f9f9;
+      border: none; cursor: pointer;
     }
+    #cpu-visual {
+      display: flex; gap: 16px; margin-top: 12px;
+    }
+    #reg-box, #stack-box {
+      padding: 8px; background: #222; color: #ddd; font-family: monospace;
+      overflow-y: auto; max-height: 200px;
+    }
+    #reg-box { flex: 0 0 200px; }
+    #stack-box { flex: 1; border-left: 1px solid #444; padding-left: 12px; }
   </style>
-  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs/loader.js"></script>
 </head>
+
 <body>
   <h2>1. Enter C Code</h2>
-  <div class="editor-container">
-    <div id="editor" class="monaco-editor-instance"></div>
-  </div>
+  <div class="editor-container"><textarea id="editor"></textarea></div>
   <div class="button-row">
     <button onclick="compileAndDisasm()">Compile</button>
     <button onclick="debugFromBreakpoint()">Debug</button>
+    <button onclick="step()">Step</button>
     <button onclick="resetStepper()">↺ Reset</button>
   </div>
 
   <h2>2. Compiled Hex Output</h2>
-  <div class="editor-container" style="height: 100px; resize: vertical;">
-    <div id="hex-editor" class="monaco-editor-instance"></div>
-  </div>
+  <div class="editor-container" style="height:100px;"><textarea id="hex-editor"></textarea></div>
 
   <h2>3. Disassembled Output</h2>
-  <div class="editor-container" style="height: 100px; resize: vertical;">
-    <div id="asm-editor" class="monaco-editor-instance"></div>
+  <div class="editor-container" style="height:150px;"><textarea id="asm-editor"></textarea></div>
+
+  <h2>4. CPU State</h2>
+  <div class="editor-container" style="height:150px;"><textarea id="cpu-editor"></textarea></div>
+
+  <div id="cpu-visual">
+    <div id="reg-box"><strong>Registers</strong></div>
+    <div id="stack-box"><strong>Stack</strong></div>
   </div>
 
+  <!-- Capstone for disassembly -->
   <script src="../libs/build-wrapper/capstone.js"></script>
-  <script src="../libs/build-tcc/tcc.js"></script>
+
+  <!-- TinyCC via Emscripten -->
+  <script type="module">
+    import('../libs/build-tcc/tcc.mjs').then(m => window.createTCC = m.default);
+  </script>
 
   <script>
-    require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.34.1/min/vs' } });
-    let editor, hexEditor, asmEditor;
+    // ————————————————————————————— Globals —————————————————————————————
+    let editor, hexEditor, asmEditor, cpuEditor;
     let capstoneModule, tccModule, disasmFunc;
     let breakpoints = new Set();
-    let breakpointDecorations = [];
-    let currentStepLine = 1;
-    let stepMarker = [];
-    let lastDisasmContent = '';
+    let asmStepMarker = [];
+    let currentInstrIndex = 0;
+    let instructions = [];
+    let ripToInstr = {}, ripToSourceLine = {};
+    let currentSourceLine = null;
+    let isDebugging = false;
 
-    require(['vs/editor/editor.main'], () => {
-      editor = monaco.editor.create(document.getElementById('editor'), {
-        value: [
-          'int test(int a, int b) {',
-          '  int x = 4;',
-          '  x++;',
-          '  return a + b;',
-          '}'
-        ].join('\n'),
-        language: 'c',
-        theme: 'vs-dark',
-        automaticLayout: true,
-        glyphMargin: true
+    let cpuState = {
+      rip: 0x1000,
+      rsp: 0x8000,
+      rbp: 0x8000,
+      stack: []
+    };
+
+    // ——————————————————————————— Setup & Editors ———————————————————————————
+    function setupEditors() {
+      editor = CodeMirror.fromTextArea(document.getElementById("editor"), {
+        mode: "text/x-csrc", theme: "dracula",
+        lineNumbers: true, gutters: ["CodeMirror-linenumbers"]
+      });
+      hexEditor = CodeMirror.fromTextArea(document.getElementById("hex-editor"), {
+        mode: "plaintext", theme: "dracula", readOnly: true
+      });
+      asmEditor = CodeMirror.fromTextArea(document.getElementById("asm-editor"), {
+        mode: "plaintext", theme: "dracula", readOnly: true
+      });
+      cpuEditor = CodeMirror.fromTextArea(document.getElementById("cpu-editor"), {
+        mode: "plaintext", theme: "dracula", readOnly: true
       });
 
-      editor.onMouseDown(e => {
-        if (e.target.type === monaco.editor.MouseTargetType.GUTTER_GLYPH_MARGIN) {
-          const line = e.target.position.lineNumber;
-          e.event.rightButton ? breakpoints.delete(line)
-                              : breakpoints.has(line) ? breakpoints.delete(line) : breakpoints.add(line);
-          updateBreakpoints();
-        }
+      // toggle breakpoints
+      editor.on("gutterClick", (cm, line) => {
+        const ln = line + 1;
+        if (breakpoints.has(ln)) breakpoints.delete(ln);
+        else breakpoints.add(ln);
+        updateBreakpoints();
       });
 
-      function updateBreakpoints() {
-        breakpointDecorations = editor.deltaDecorations(
-          breakpointDecorations,
-          [...breakpoints].map(line => ({
-            range: new monaco.Range(line, 1, line, 1),
-            options: {
-              isWholeLine: false,
-              glyphMarginClassName: 'breakpoint-glyph',
-              glyphMarginHoverMessage: { value: '⛔ Breakpoint' }
-            }
-          }))
-        );
-      }
+      // sample code
+      editor.setValue(`__attribute__((noinline)) int test(int a, int b) {
+    int x = 4;
+    x++;
+    return a + b;
+}
 
-      hexEditor = monaco.editor.create(document.getElementById('hex-editor'), {
-        value: '', language: 'plaintext', readOnly: true, theme: 'vs-dark', wordWrap: 'on', lineNumbers: 'off',
-        fontFamily: 'Courier New', fontSize: 14
-      });
+int main() {
+    int b = test(3, 44);
+    b++;
+    int c = b += 3;
+}`);
 
-      asmEditor = monaco.editor.create(document.getElementById('asm-editor'), {
-        value: 'Loading modules…', language: 'plaintext', readOnly: true,
-        theme: 'vs-dark', wordWrap: 'on', lineNumbers: 'off'
-      });
-
-      initModules();
-    });
-
-    async function initModules() {
-      capstoneModule = await createCapstoneModule({
-        print: txt => appendDisasm(txt), printErr: txt => appendDisasm('[cap err] ' + txt)
-      });
-      disasmFunc = capstoneModule.cwrap('disasm_x86', null, ['array', 'number']);
-      appendDisasm('✅ Capstone loaded.');
-
-      tccModule = await createTCC({
-        locateFile: path => path.endsWith('.wasm') || path.endsWith('.data') ? '../libs/build-tcc/' + path : path,
-        print: txt => console.log('[tcc] ' + txt),
-        printErr: txt => console.error('[tcc err] ' + txt)
-      });
-      hexEditor.setValue('✅ TinyCC loaded.\n⏳Waiting for compilation…');
+      waitForModules();
     }
 
+    function updateBreakpoints() {
+      editor.clearGutter("breakpoints");
+      breakpoints.forEach(line => {
+        const marker = document.createElement("div");
+        marker.style.color = "#f00";
+        marker.innerText = "●";
+        editor.setGutterMarker(line - 1, "breakpoints", marker);
+      });
+    }
+
+    function waitForModules() {
+      const iv = setInterval(() => {
+        if (window.createTCC) {
+          clearInterval(iv);
+          initModules();
+        }
+      }, 100);
+    }
+
+    window.onload = setupEditors;
+
+    // —————————————————————————— Engine Initialization ——————————————————————————
+    async function initModules() {
+      capstoneModule = await createCapstoneModule({
+        print: txt => appendDisasm(txt),
+        printErr: txt => appendDisasm('[cap err] ' + txt)
+      });
+      disasmFunc = capstoneModule.cwrap('disasm_x86', null, ['array','number']);
+      appendDisasm('✅ Capstone loaded.');
+
+      tccModule = await window.createTCC({
+        locateFile: p => p.endsWith('.wasm')||p.endsWith('.data')
+          ? '../libs/build-tcc/'+p : p,
+        print: txt => console.log('[tcc] '+txt),
+        printErr: txt => console.error('[tcc err] '+txt)
+      });
+
+      hexEditor.setValue('✅ TinyCC loaded.\n⏳Waiting for compilation...');
+      updateRegisters();
+      updateCPUVisualization();
+    }
+
+    // ————————————————————————— CPU Display Helpers —————————————————————————
+    function updateRegisters() {
+      const regs = 
+        `RIP: 0x${cpuState.rip.toString(16)}\n` +
+        `RSP: 0x${cpuState.rsp.toString(16)}\n` +
+        `RBP: 0x${cpuState.rbp.toString(16)}\n`;
+      document.getElementById('reg-box').innerHTML = `<strong>Registers</strong><pre>${regs}</pre>`;
+    }
+
+    function updateCPUVisualization() {
+      const stackLines = cpuState.stack.map((v,i) => {
+        const addr = cpuState.rsp + i*8;
+        return `0x${addr.toString(16).padStart(8,'0')} : 0x${v.toString(16).padStart(8,'0')}`;
+      }).join('\n');
+      document.getElementById('stack-box')
+        .innerHTML = `<strong>Stack</strong><pre>${stackLines}</pre>`;
+      // also log to CPU-pane
+      const prev = cpuEditor.getValue();
+      cpuEditor.setValue(prev + stackLines + '\n\n');
+      cpuEditor.scrollTo(null, cpuEditor.getScrollInfo().height);
+    }
+
+    // ————————————————————————— Compile & Disassemble —————————————————————————
     function compileAndDisasm() {
       compileToHex(() => runDisasm());
     }
 
     function compileToHex(callback) {
-      const current = hexEditor.getValue();
-      hexEditor.setValue(current + '\n🛠️ Compiling...');
-      setTimeout(() => {
-        const code = editor.getValue();
-        tccModule.FS.writeFile('input.c', code);
-
-        const lenPtr = tccModule._malloc(4);
-        const ptr = tccModule.cwrap('compile_and_get_text', 'number', ['string', 'number'])('input.c', lenPtr);
-        const size = tccModule.HEAP32[lenPtr >> 2];
-        tccModule._free(lenPtr);
-
-        if (!ptr || !size) {
-          hexEditor.setValue(current + '\n❌ Compile failed.');
-          return;
-        }
-
-        const bytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
-        hexEditor.setValue(current + '\n' + formatHex(bytes) + '\n✅ Compilation finished.');
-        hexEditor.revealLine(hexEditor.getModel().getLineCount());
-        window.lastCompiledBytes = bytes;
-
-        const extractSymbols = tccModule.cwrap('extract_symbols', 'string', ['string']);
-        const symbolJSON = extractSymbols('out.o');
-        try {
-          window.symbolMap = JSON.parse(symbolJSON);
-          console.log('📍 Function symbols:', window.symbolMap);
-        } catch (err) {
-          console.error('❌ Failed to parse symbol map:', err, symbolJSON);
-        }
-
-        callback?.();
-      }, 1000);
-    }
-
-    function debugFromBreakpoint() {
-      const bpLine = breakpoints.size > 0 ? Math.min(...breakpoints) : currentStepLine;
-      highlightLine(bpLine);
-      const allLines = editor.getValue().split('\n');
-      const debugLines = allLines.slice(0, bpLine);
-      const balancedLines = balanceBraces(debugLines);
-      const code = balancedLines.join('\n');
-      tccModule.FS.writeFile('debug_input.c', code + '\n');
-
+      const code = editor.getValue();
+      tccModule.FS.writeFile('input.c', code);
       const lenPtr = tccModule._malloc(4);
-      const ptr = tccModule.cwrap('compile_and_get_text', 'number', ['string', 'number'])('debug_input.c', lenPtr);
-      const size = tccModule.HEAP32[lenPtr >> 2];
+      const ptr = tccModule.cwrap(
+        'compile_and_get_text', 'number', ['string','number']
+      )('input.c', lenPtr);
+      const size = tccModule.HEAP32[lenPtr>>2];
       tccModule._free(lenPtr);
-      if (!ptr || !size) return appendDisasm('\n❌ Debug compile failed.');
-      window.lastCompiledBytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
-      appendDisasm(`\n🧠 Debugging line ${bpLine}...`);
-      runDisasm();
-      currentStepLine = bpLine + 1;
-    }
-
-    function balanceBraces(lines) {
-      let open = 0, close = 0;
-      for (const line of lines) {
-        open += (line.match(/{/g) || []).length;
-        close += (line.match(/}/g) || []).length;
+      if (!ptr || size <= 0) {
+        hexEditor.setValue('❌ Compile failed');
+        return;
       }
-      while (close < open) {
-        lines.push('}');
-        close++;
+      const bytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
+      window.lastCompiledBytes = bytes;
+      hexEditor.setValue(formatHex(bytes) + '\n✅ Compilation finished.');
+
+      // reset maps
+      ripToInstr = {};
+      ripToSourceLine = {};
+      currentInstrIndex = 0;
+
+      // extract symbol table (optional)
+      try {
+        const symbolJSON = tccModule.cwrap('extract_symbols','string',['string'])('out.o');
+        const parsed = JSON.parse(symbolJSON,(k,v)=>
+          typeof v==='string'&&/^\d+$/.test(v)?Number(v):v
+        );
+        const base = 0x1000, map = {};
+        for (let [n,off] of Object.entries(parsed)) map[n]=base+Number(off);
+        window.symbolMap = map;
+      } catch(e){
+        console.warn("Symbol parse failed:", e);
       }
-      return lines;
-    }
 
-    function resetStepper() {
-      currentStepLine = 1;
-      highlightLine(null);
-      stepMarker = editor.deltaDecorations(stepMarker, []);
-      asmEditor.setValue('↺ Stepper reset.');
-      hexEditor.setValue('↺ Reset complete.\n⏳Waiting for compilation…');
-      lastDisasmContent = '';
-    }
-
-    function highlightLine(line) {
-      stepMarker = editor.deltaDecorations(stepMarker, line ? [{
-        range: new monaco.Range(line, 1, line, 1),
-        options: { isWholeLine: true, className: 'step-highlight' }
-      }] : []);
+      callback();
     }
 
     function runDisasm() {
       const buf = window.lastCompiledBytes;
-      if (!disasmFunc || !buf) return alert('Missing Capstone or compiled bytes');
+      if (!disasmFunc || !buf) return;
+      asmEditor.setValue('');  // clear old
       disasmFunc(buf, buf.length);
+      setTimeout(buildInstructionList, 10);
     }
 
+    // ————————————————————————— Build Flat Instruction List —————————————————————————
+    function buildInstructionList() {
+      instructions = [];
+      const lines = asmEditor.getValue().split('\n');
+      lines.forEach((line, i) => {
+        const m = line.trim().match(/^0x([0-9a-f]+):/);
+        if (!m) return;
+        const rip = parseInt(m[1], 16);
+        const srcLine = ripToSourceLine[rip]||null;
+        instructions.push({ rip, asmRow: i, srcLine });
+      });
+      currentInstrIndex = 0;
+    }
+
+    // ————————————————————————— Append Disasm Line —————————————————————————
     function appendDisasm(txt) {
-      const current = asmEditor.getValue();
       const newLine = txt.trim();
-
-      const match = /^0x([0-9a-f]+):/.exec(newLine);
-      let labelLine = '';
-
-      if (match && window.symbolMap) {
-        const addr = parseInt(match[1], 16);
-        for (const [name, symAddr] of Object.entries(window.symbolMap)) {
-          if (symAddr === addr) {
-            labelLine = `${name}:`;
-            break;
-          }
-        }
+      let cur = asmEditor.getValue().split('\n');
+      if (cur.includes(newLine)) return;
+      // detect labels
+      if (/^[A-Za-z_]\w*:$/.test(newLine)) {
+        const lbl = newLine.slice(0,-1);
+        if (lbl==='test') currentSourceLine=1;
+        if (lbl==='main') currentSourceLine=7;
       }
-
-      if (!current.includes(newLine)) {
-        let updated = current;
-        if (labelLine && !current.includes(labelLine)) {
-          updated += '\n' + labelLine;
-        }
-        updated += '\n' + newLine;
-        asmEditor.setValue(updated);
-        asmEditor.revealLine(asmEditor.getModel().getLineCount());
+      // record instruction→C mapping
+      const m = newLine.match(/^0x([0-9a-f]+):/);
+      if (m && currentSourceLine!=null) {
+        const rip = parseInt(m[1],16);
+        ripToSourceLine[rip] = currentSourceLine;
       }
+      // append
+      cur.push(newLine);
+      asmEditor.setValue(cur.join('\n'));
+      asmEditor.scrollTo(null, asmEditor.getScrollInfo().height);
     }
 
     function formatHex(bytes) {
-      const lines = [];
-      for (let i = 0; i < bytes.length; i += 16) {
-        const chunk = bytes.slice(i, i + 16);
-        const hexLine = chunk.map(b => b.toString(16).padStart(2, '0')).join(' ');
-        const offset = i.toString(16).padStart(4, '0');
-        lines.push(`${offset}: ${hexLine}`);
+      let out = '';
+      for (let i=0; i<bytes.length; i+=16) {
+        const chunk = bytes.slice(i,i+16)
+                       .map(b=>b.toString(16).padStart(2,'0'))
+                       .join(' ');
+        out += i.toString(16).padStart(4,'0') + ': ' + chunk + '\n';
       }
-      return lines.join('\n');
+      return out;
+    }
+
+    // —————————————————————————— Step Through ——————————————————————————
+    function step() {
+      if (currentInstrIndex >= instructions.length) {
+        appendDisasm("✅ End of instructions");
+        return;
+      }
+      const inst = instructions[currentInstrIndex++];
+      // highlight asm
+      asmEditor.operation(()=>{
+        asmStepMarker.forEach(m=>asmEditor.removeLineClass(m,'background','step-highlight'));
+        asmStepMarker = [inst.asmRow];
+        asmEditor.addLineClass(inst.asmRow,'background','step-highlight');
+        asmEditor.scrollIntoView({line:inst.asmRow,ch:0},100);
+      });
+      // highlight C
+      if (inst.srcLine!=null) {
+        highlightLine(inst.srcLine);
+        currentSourceLine = inst.srcLine;
+      }
+      // (optional) simulate CPU state
+      cpuState.rip = inst.rip;
+      updateRegisters();
+      updateCPUVisualization();
+    }
+
+    // —————————————————————— Debug From Breakpoint ——————————————————————
+    async function debugFromBreakpoint() {
+      if (isDebugging) return;
+      isDebugging = true;
+
+      const bpLine = breakpoints.size>0 ? Math.min(...breakpoints) : 1;
+      highlightLine(bpLine);
+
+      // compile+disasm
+      compileToHex(() => runDisasm());
+
+      // after disasm, jump RIP→main
+      setTimeout(()=>{
+        if (window.symbolMap?.main) {
+          cpuState.rip = window.symbolMap.main;
+          updateRegisters();
+          updateCPUVisualization();
+          highlightLine(bpLine);
+        }
+        isDebugging = false;
+      }, 100);
+    }
+
+    // ————————————————————————— Reset —————————————————————————
+    function resetStepper() {
+      currentInstrIndex = 0;
+      ripToInstr = {}; ripToSourceLine = {};
+      asmEditor.setValue(''); hexEditor.setValue(''); cpuEditor.setValue('');
+      cpuState = { rip:0x1000, rsp:0x8000, rbp:0x8000, stack: [] };
+      highlightLine(null);
+      updateRegisters();
+      updateCPUVisualization();
+    }
+
+    // —————————————————————————— Helpers ——————————————————————————
+    function highlightLine(line) {
+      const total = editor.lineCount();
+      for (let i=0; i<total; i++)
+        editor.removeLineClass(i,'background','step-highlight');
+      if (line!=null)
+        editor.addLineClass(line-1,'background','step-highlight');
     }
   </script>
 </body>
