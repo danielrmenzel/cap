@@ -4,3 +4,6 @@
 [submodule "libs/tinycc"]
 	path = libs/tinycc
 	url = https://github.com/TinyCC/tinycc.git
+[submodule "libs/tinyemu"]
+	path = libs/tinyemu
+	url = https://github.com/dearchap/tinyemu.git
