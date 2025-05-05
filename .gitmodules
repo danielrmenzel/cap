@@ -4,6 +4,3 @@
 [submodule "libs/tinycc"]
 	path = libs/tinycc
 	url = https://github.com/TinyCC/tinycc.git
-[submodule "libs/unicorn"]
-	path = libs/unicorn
-	url = https://github.com/AlexAltea/unicorn.js.git
