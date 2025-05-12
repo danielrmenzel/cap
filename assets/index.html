@@ -1,445 +1,503 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>WASM C Compiler & Disassembler + TinyEMU Debugger</title>
+<meta charset="UTF-8" />
+<title>WASM C Compiler & Disassembler + TinyEMU Debugger</title>
 
-  <!-- CodeMirror CSS -->
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css" />
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/dracula.min.css" />
+<!-- CodeMirror --------------------------------------------------------->
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css"/>
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/dracula.min.css"/>
 
-  <style>
-    html, body {
-      height:100%; margin:0; padding:0;
-      background:#282a36; color:#f8f8f2; font-family:sans-serif;
-    }
-    body {
-      display:flex; flex-direction:column; padding:16px; gap:12px;
-    }
-    .editor-container {
-      height:200px; border:1px solid #44475a;
-      resize:vertical; overflow:hidden;
-    }
-    .CodeMirror {
-      width:100%; height:100%; font-family:monospace; font-size:14px;
-    }
-    .step-highlight {
-      background:rgba(80,250,123,0.2) !important;
-    }
-    .button-row {
-      display:flex; gap:8px; flex-wrap:wrap;
-    }
-    button {
-      background:#6272a4; color:#f8f8f2; border:none;
-      padding:6px 12px; cursor:pointer;
-    }
-    #cpu-visual {
-      display:flex; gap:16px; margin-top:12px;
-    }
-    #reg-box, #stack-box {
-      background:#44475a; padding:8px;
-      font-family:monospace; color:#f8f8f2;
-      overflow:auto; max-height:200px;
-    }
-    #reg-box { flex:0 0 200px; }
-    #stack-box { flex:1; border-left:1px solid #6272a4; padding-left:12px; }
-  </style>
+<style>
+ html,body{height:100%;margin:0;padding:0;background:#282a36;color:#f8f8f2;font-family:sans-serif}
+ body{display:flex;flex-direction:column;padding:16px;gap:12px}
+ .editor-container{height:200px;border:1px solid #44475a;resize:vertical;overflow:hidden}
+ .CodeMirror{width:100%;height:100%;font-family:monospace;font-size:14px}
+ .step-highlight{background:rgba(80,250,123,.2)!important}
+ .line-highlight{background:rgba(80,250,123,.2)!important}
+ .button-row{display:flex;gap:8px;flex-wrap:wrap}
+ button{background:#6272a4;color:#f8f8f2;border:none;padding:6px 12px;cursor:pointer}
+ #cpu-visual{display:flex;gap:16px;margin-top:12px}
+ #reg-box,#stack-box{background:#44475a;padding:8px;font-family:monospace;
+                     color:#f8f8f2;overflow:auto;max-height:200px}
+ #reg-box{flex:0 0 200px}
+ #stack-box{flex:1;border-left:1px solid #6272a4;padding-left:12px}
+</style>
 </head>
 <body>
-  <h2>1. Enter C Code</h2>
-  <div class="editor-container"><textarea id="editor"></textarea></div>
+<h2>1. Enter C Code</h2>
+<div class="editor-container"><textarea id="editor"></textarea></div>
 
-  <div class="button-row">
-    <button onclick="compileAndDisasm()">Compile &amp; Disasm</button>
-    <button onclick="debugInit()">Start Debug</button>
-    <button onclick="step()">Step</button>
-    <button onclick="resetStepper()">Reset</button>
-  </div>
+<div class="button-row">
+  <button onclick="compileAndDisasm()">Compile & Disasm</button>
+  <button onclick="debugInit()">Start Debug</button>
+  <button onclick="step()">Step</button>
+  <button onclick="resetStepper()">Reset</button>
+</div>
 
-  <h2>2. Hex Output</h2>
-  <div class="editor-container" style="height:100px;">
-    <textarea id="hex-editor"></textarea>
-  </div>
+<h2>2. Hex Output</h2>
+<div class="editor-container" style="height:100px"><textarea id="hex-editor"></textarea></div>
 
-  <h2>3. Disassembly</h2>
-  <div class="editor-container" style="height:150px;">
-    <textarea id="asm-editor"></textarea>
-  </div>
+<h2>3. Disassembly</h2>
+<div class="editor-container" style="height:150px"><textarea id="asm-editor"></textarea></div>
 
-  <h2>4. CPU State</h2>
-  <div class="editor-container" style="height:150px;">
-    <textarea id="cpu-editor"></textarea>
-  </div>
+<h2>4. CPU State</h2>
+<div class="editor-container" style="height:150px"><textarea id="cpu-editor"></textarea></div>
 
-  <div id="cpu-visual">
-    <div id="reg-box"><strong>Registers</strong></div>
-    <div id="stack-box"><strong>Stack</strong></div>
-  </div>
+<div id="cpu-visual">
+  <div id="reg-box"><strong>Registers</strong></div>
+  <div id="stack-box"><strong>Stack</strong></div>
+</div>
 
-  <!-- 1) Capstone for disassembly -->
-  <script src="../libs/build-wrapper/capstone.js"></script>
+<!-- Capstone module ----------------------------------------------------->
+<script type="module">
+import createCapstoneModule from '../libs/build-wrapper/capstone.js';
+window.createCapstoneModule = createCapstoneModule;
+</script>
 
-  <!-- 2) TinyCC via Emscripten -->
-  <script type="module">
-    import('../libs/build-tcc/tcc.mjs')
-      .then(m => window._createTCC = m.default);
-  </script>
+<!-- TinyCC (WASM) ------------------------------------------------------->
+<script type="module">
+import('../libs/build-tcc/tcc.mjs').then(m=>window._createTCC=m.default);
+</script>
 
-  <!-- 3) CodeMirror -->
-  <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
-  <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/clike/clike.min.js"></script>
+<!-- CodeMirror ---------------------------------------------------------->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/clike/clike.min.js"></script>
 
+<script>
+/* ───────────────────────── globals ───────────────────────── */
+const textBase = 0x2000;
+let editor,hexEditor,asmEditor,cpuEditor;
+let capstoneModule,disasmFunc,tccModule;
+let ripToAsmRow={},ripToSrcLine={},srcLineToRIPs={};
+let instructions=[],codeBytes=null,currentSourceLine=null;
+let cpuState={};            // filled in debugInit()
+let symbolMap={};
 
+/* ─────────────────── util logging helper ─────────────────── */
+const log=(tag,...m)=>console.log(tag,...m);
 
+/* ─────────────────── helpers for 64-bit mem ───────────────── */
+function write64(a,v){cpuState.mem[a]=v&0xffffffff;cpuState.mem[a+4]=(v>>>32)&0xffffffff}
+function read64(a){return (cpuState.mem[a]??0)|((cpuState.mem[a+4]??0)<<32)}
 
+/* mnemonic + misc helpers */
+function mnem(line){return (line.split(':')[1]||'').trim().split(/\s+/)[0]?.toLowerCase()||''}
+function rbpDisp(line){
+  const m=line.match(/\[rbp\s*-\s*(0x[0-9a-f]+|\d+)\]/i);
+  if(!m)return null;return cpuState.rbp-parseInt(m[1],m[1].startsWith('0x')?16:10);
+}
+function validRip(r){return r!==undefined&&ripToAsmRow.hasOwnProperty(r)}
 
-  <script>
-    // ————————————————— Locater for TCC assets —————————————————
-    async function createTCC() {
-      return window._createTCC({
-        locateFile: path => {
-          if (path.endsWith('.wasm') || path.endsWith('.data')) {
-            return '../libs/build-tcc/' + path;
-          }
-          return path;
-        }
-      });
+/* ─────────────────── CodeMirror setup ─────────────────────── */
+window.onload=async function setup() {
+  editor      = CodeMirror.fromTextArea(document.getElementById('editor'),{mode:'text/x-csrc',theme:'dracula',lineNumbers:true});
+  hexEditor   = CodeMirror.fromTextArea(document.getElementById('hex-editor'), {theme:'dracula',readOnly:true});
+  asmEditor   = CodeMirror.fromTextArea(document.getElementById('asm-editor'), {theme:'dracula',readOnly:true});
+  cpuEditor   = CodeMirror.fromTextArea(document.getElementById('cpu-editor'), {theme:'dracula',readOnly:true});
+
+  editor.setValue(`__attribute__((noinline)) int bar(int x){
+    volatile int t=x+1; return t;
+}
+__attribute__((noinline)) int foo(int y){
+    volatile int d=y*2; return bar(d);
+}
+int main(){ volatile int in=3; int r=foo(in); return r; }`);
+
+  capstoneModule=await createCapstoneModule({print:appendAsm,printErr:console.error});
+  disasmFunc    =capstoneModule.cwrap('disasm_x86',null,['array','number','number']);
+  log('✅ Capstone ready');
+};
+
+/* inject NOP markers so we can map → source line */
+function injectMarkers (src) {
+  const out = [];
+  src.split('\n').forEach((ln, i) => {
+    if (ln.trim() !== '') {                          // <─ new guard
+      out.push(`__asm__(".byte 0x0F,0x1F,0x40,${Math.min(i+1,255)}");`);
     }
-
-    // ————————————————— Globals —————————————————
-    let editor, hexEditor, asmEditor, cpuEditor;
-    let capstoneModule, disasmFunc, tccModule;
-    let instructions = [], instIndex = 0;
-    let ripToAsmRow = {}, ripToSrcLine = {};
-    let currentSourceLine = null;
-    let codeBytes = null;
-    const textBase = 0x1000;
-    let emuHandle = 0;
-    let cpuState = { rip: textBase, rsp: 0x8000, rbp: 0x8000, stack: [] };
-
-    window.onload = setupEditors;
-
-
-
-    function injectLineMarkers(sourceCode) {
-      const lines = sourceCode.split('\n');
-      const output = [];
-      let lineCounter = 1;
-
-      for (let i = 0; i < lines.length; i++) {
-        const trimmed = lines[i].trim();
-
-        const skip =
-          trimmed === '' ||
-          trimmed.startsWith('//') ||
-          trimmed.startsWith('/*') ||
-          trimmed.startsWith('*') ||
-          trimmed.startsWith('#') ||
-          trimmed.endsWith(':') ||
-          trimmed.startsWith('}') ||
-          trimmed === '{';
-
-        if (!skip) {
-          // Encode line number in last byte (up to 255)
-          const encoded = Math.min(lineCounter, 255);
-          output.push(`  __asm__(".byte 0x0F, 0x1F, 0x40, ${encoded}");`);
-          lineCounter++;
-        }
-
-        output.push(lines[i]);
-      }
-
-      return output.join('\n');
-    }
-
-
-    // ————————————————— Setup CodeMirror editors —————————————————
-    function setupEditors() {
-      editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
-        mode:'text/x-csrc', theme:'dracula', lineNumbers:true
-      });
-      hexEditor = CodeMirror.fromTextArea(document.getElementById('hex-editor'), {
-        mode:'plaintext', theme:'dracula', readOnly:true
-      });
-      asmEditor = CodeMirror.fromTextArea(document.getElementById('asm-editor'), {
-        mode:'plaintext', theme:'dracula', readOnly:true
-      });
-      cpuEditor = CodeMirror.fromTextArea(document.getElementById('cpu-editor'), {
-        mode:'plaintext', theme:'dracula', readOnly:true
-      });
-
-      const originalCode = `__attribute__((noinline)) int test(int a, int b) {
-  int x = 4; x++;
-  return a + b;
+    out.push(ln);
+  });
+  return out.join('\n');
 }
 
-int main() {
-  int b = test(3,44);
-  for(int i=0;i<3;i++){
-    b += i;
+
+
+/* ──────────────────────────────────────────────────────────
+ *  very-minimal highlighters so step() never explodes
+ *  - adds/removes a CSS class on the relevant line
+ *  - if you don’t care about colouring, leave bodies empty
+ * ────────────────────────────────────────────────────────── */
+ let curAsmRow  = null;
+let curSrcLine = null;
+
+function highlightAsm(rip) {
+  if (curAsmRow !== null) {
+    asmEditor.removeLineClass(curAsmRow,  'background', 'step-highlight');
   }
-  return b;
-}`
+  curAsmRow = ripToAsmRow[rip];
+  if (curAsmRow != null) {
+    asmEditor.addLineClass   (curAsmRow,  'background', 'step-highlight');
+    asmEditor.scrollIntoView({ line: curAsmRow, ch: 0 });
+  }
+}
 
-      editor.setValue(originalCode);
+function highlightSrc(line) {
+  /* remove previous highlight only if we really have one */
+  if (typeof curSrcLine === 'number') {
+    editor.removeLineClass(curSrcLine, 'background', 'line-highlight');
+  }
 
-    
+  /* add new highlight only for a _number_ we recognise */
+  if (typeof line === 'number') {
+    curSrcLine = line - 1;                  // convert 1-based → 0-based
+    editor.addLineClass(curSrcLine, 'background', 'line-highlight');
+    editor.scrollIntoView({ line: curSrcLine, ch: 0 });
+  } else {
+    curSrcLine = undefined;                 // nothing to highlight
+  }
+}
 
 
-      createCapstoneModule({
-        print: txt => appendAsm(txt),
-        printErr: txt => console.error(txt)
-      }).then(mod => {
-        capstoneModule = mod;
-        disasmFunc    = capstoneModule.cwrap('disasm_x86', null, ['array','number']);
-        appendAsm('✅ Capstone loaded.');
-      });
-    }
+/* ────────────────── compile & disassemble ─────────────────── */
+async function compileAndDisasm(){
+  asmEditor.setValue('');ripToAsmRow={};instructions=[];currentSourceLine=null;
+  tccModule=await window._createTCC({locateFile:p=>p.endsWith('.wasm')||p.endsWith('.data')
+                                           ? '../libs/build-tcc/'+p : p});
+  const src=injectMarkers(editor.getValue());
+  tccModule.FS.writeFile('in.c',src);
 
-    // ————————————————— Update UI Helpers —————————————————
-    function updateRegisters() {
-      const r = cpuState;
-      const s = `RIP: 0x${r.rip.toString(16)}
-RSP: 0x${r.rsp.toString(16)}
-RBP: 0x${r.rbp.toString(16)}`;
-      document.getElementById('reg-box')
-              .innerHTML = `<strong>Registers</strong><pre>${s}</pre>`;
-    }
-    function updateStack() {
-      const lines = cpuState.stack.map((v,i)=>
-        `0x${(cpuState.rsp + i*8).toString(16).padStart(8,'0')}: 0x${v.toString(16).padStart(16,'0')}`
-      );
-      document.getElementById('stack-box')
-              .innerHTML = `<strong>Stack</strong><pre>${lines.join('\n')}</pre>`;
-      cpuEditor.setValue(cpuEditor.getValue() + lines.join('\n') + '\n\n');
-      cpuEditor.scrollTo(null, cpuEditor.getScrollInfo().height);
-    }
+  const lenPtr=tccModule._malloc(4);
+  const ptr=tccModule.cwrap('compile_and_get_text','number',['string','number'])('in.c',lenPtr);
+  const size=tccModule.HEAP32[lenPtr>>2];tccModule._free(lenPtr);
 
-    // ————————————————— Compile & Disasm —————————————————
-    async function compileAndDisasm() {
-      asmEditor.setValue('');
-      ripToAsmRow = {}; ripToSrcLine = {};
-      instructions = []; instIndex = 0;
+  codeBytes=new Uint8Array(tccModule.HEAPU8.buffer,ptr,size);
+  hexEditor.setValue(formatHex(codeBytes)+'\n✅ Compiled');
 
-      tccModule = await createTCC();
-      // tccModule.FS.writeFile('in.c', editor.getValue());
-      const rawCode = editor.getValue();
-      const instrumentedCode = injectLineMarkers(rawCode);
-      tccModule.FS.writeFile('in.c', instrumentedCode);
+  /* ---- symbol table ---- */
+  try{
+    const js=tccModule.cwrap('extract_symbols','string',['string'])('out.o');
+    symbolMap=JSON.parse(js,(k,v)=>/^\d+$/.test(v)?Number(v):v);
+    log('SYM',symbolMap);
+  }catch(e){console.warn('symbol extract failed',e)}
 
-      const lenPtr = tccModule._malloc(4),
-            ptr    = tccModule.cwrap('compile_and_get_text','number',['string','number'])('in.c', lenPtr),
-            size   = tccModule.HEAP32[lenPtr>>2];
-      tccModule._free(lenPtr);
+  /* ─ disassemble ─ */
+  disasmFunc(codeBytes,codeBytes.length,textBase);
+  setTimeout(()=>{buildInstList();},5);          // let appendAsm finish
+}
 
-      codeBytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
-      hexEditor.setValue(formatHex(codeBytes) + '\n✅ Compiled');
 
-      // extract symbols
-      try {
-        const js   = tccModule.cwrap('extract_symbols','string',['string'])('out.o'),
-              sym  = JSON.parse(js,(k,v)=> /^\d+$/.test(v)?Number(v):v);
-        window.symbolMap = {};
-        for (let [n,o] of Object.entries(sym))
-          window.symbolMap[n] = textBase + o;
-      } catch {}
+// put this just once, outside appendAsm
+let currentSrcLine = null;
 
-      // run Capstone
-      disasmFunc(codeBytes, codeBytes.length);
-      setTimeout(() => {
-        buildInstList();
-        extractRipToSourceMap();  // <—— HERE
-      }, 10);
+/* appendAsm callback (patched) */
+function appendAsm (line) {
+  line = line.trim();
+  if (!line) return;
 
-      setTimeout(buildInstList, 10);
-    }
+  const out = asmEditor.getValue().split('\n');
+  if (out.includes(line)) return;
 
-    function appendAsm(line) {
-      line = line.trim();
-      const cur = asmEditor.getValue().split('\n');
-      if (cur.includes(line)) return;
+  /* rip of *this* line */
+  const m  = line.match(/^0x([0-9a-f]+):/);
+  if (!m) return;
+  const rip = parseInt(m[1], 16);
+  ripToAsmRow[rip] = out.length;
 
-      const m = line.match(/^0x([0-9a-f]+):/);
-      if (m && window.symbolMap) {
-        const addr = parseInt(m[1],16);
-        for (const [lbl,ad] of Object.entries(window.symbolMap)) {
-          if (ad===addr && !cur.includes(lbl+':')) {
-            cur.push(lbl+':');
-            break;
-          }
-        }
-      }
+  /* ── did we just print a marker? ───────────────────────── */
+  const mark = line.match(/nop\s+dword ptr \[rax \+ (\d+)\]/i);
+  if (mark) currentSrcLine = parseInt(mark[1], 10);   // 1-based
+
+  /* “stick” the latest src-line to *every* instruction */
+  if (currentSrcLine != null) ripToSrcLine[rip] = currentSrcLine;
+
+  out.push(line);
+  asmEditor.setValue(out.join('\n'));
+}
+
+
+
+
+/* build linear instruction list */
+function buildInstList(){
+  instructions=Object.keys(ripToAsmRow).map(x=>parseInt(x)).sort((a,b)=>a-b);
+  log('INST',instructions.map(i=>'0x'+i.toString(16)));
+}
+
+/* ─────────────────── debugger init ────────────────────────── */
+function debugInit(){
+  if(!codeBytes)return alert('Compile first!');
+  const start=(symbolMap.main??0)+textBase;
+
+  cpuState={rip:start,rsp:0x8000,rbp:0x8000,mem:{},stack:[],eax:0,ecx:0, ZF:false,SF:false};
+  updateUI();
+  log(`DBG start at 0x${start.toString(16)}`);
+}
+
+// --------------------------------------------------------------------------
+//  SAFE-LOOKUP helper (keep this just once, above step or at the top)
+// --------------------------------------------------------------------------
+const lookup = name => typeof window[name] === 'function'
+                        ? window[name]
+                        : () => {};            // harmless no-op
+
+
+
+                        /* ------------------------------------------------------------------
+ *  helper: dump a 5-slot window around RSP (RSP ± 16 bytes)
+ * ------------------------------------------------------------------ */
+ function stackWindow () {
+  const win = [];
+  const top    = cpuState.rsp + 0x10;   // two slots above
+  const bottom = cpuState.rsp - 0x10;   // two slots below
+
+  for (let a = top; a >= bottom; a -= 8) {
+    const empty = cpuState.mem[a] === undefined &&
+                  cpuState.mem[a + 4] === undefined;
+    const val   = empty ? '   ??'
+                        : '0x' + read64(a).toString(16).padStart(16, '0');
+
+    let mark = '';
+    if (a === cpuState.rsp && a === cpuState.rbp) mark = '← RSP, ← RBP';
+    else if (a === cpuState.rsp)                  mark = '← RSP';
+    else if (a === cpuState.rbp)                  mark = '← RBP';
+
+    win.push(`0x${a.toString(16).padStart(4, '0')}: ${val} ${mark}`);
+  }
+  return win.join('\n');
+}
+
+/* ── pretty console dump for the current RIP ──────────────── */
+function dbgLine(rip){
+  const srcLine  = ripToSrcLine[rip];          // 1-based or undefined
+  const asmRow   = ripToAsmRow [rip];          // 0-based CodeMirror row
+  const srcTxt   = (typeof srcLine === 'number')
+                   ? editor.getLine(srcLine-1).trim()
+                   : '(no src)';
+  const asmTxt   = (asmRow != null)
+                   ? asmEditor.getLine(asmRow).split(':')[1].trim()
+                   : '(no asm)';
+
+  console.log(
+`SRC  L${srcLine ?? '-'}\t: ${srcTxt}
+ASM  L${asmRow ?? '-'}\t: ${asmTxt}
+────────────────────────────────────────────`);
+}
+
+
+/* ─────────────────────────────────────────────────────────────
+ *  step() – single-step pseudo-CPU interpreter
+ * ------------------------------------------------------------------ */
+function step () {
+  /* ── HALT guard ─────────────────────────────────────────── */
+  if (cpuState.rip === undefined) {
+    console.log('🚫 HALT – no further instructions'); return;
+  }
+
+  /* ── fetch current instruction --------------------------- */
+  if (!cpuState.mem) cpuState.mem = {};
+  const rip   = cpuState.rip;
+  const row   = ripToAsmRow[rip];
+  const asmLn = row != null ? asmEditor.getLine(row) : '';
+  const body  = (asmLn.split(':')[1] ?? asmLn).trim();
+  const low   = body.toLowerCase();
+  const op    = low.split(/\s+/)[0] || '';
+
+  const idx      = instructions.indexOf(rip);
+  const seqNext  = instructions[idx + 1];        // REAL fall-through
+
+  console.log(`STEP 0x${rip.toString(16)}  ${body}`);
+
+  /* ── helpers --------------------------------------------- */
+  const dispRbp = () => {
+    const m = low.match(/\[rbp\s*-\s*(0x[0-9a-f]+|\d+)\]/i);
+    return m ? cpuState.rbp -
+               parseInt(m[1], m[1].startsWith('0x') ? 16 : 10) : null;
+  };
+  const w64 = (a,v)=>{cpuState.mem[a]=v&0xffffffff;
+                      cpuState.mem[a+4]=(v>>>32)&0xffffffff;};
+  const r64 = a =>  (cpuState.mem[a]??0) |
+                   ((cpuState.mem[a+4]??0) << 32);
+
+  /* ── MOV / ADD we actually need -------------------------- */
+  /* store EAX → local  (mov dword ptr [rbp-X], eax) */
+  if (op === 'mov' && low.includes('[rbp -') && /,\s*eax\s*$/.test(low)) {
+      const a = dispRbp(); if (a !== null) cpuState.mem[a] = cpuState.eax;
+
+  /* load local → EAX   (mov eax, dword ptr [rbp-X]) */
+  } else if (op === 'mov' &&
+             /^\s*mov\s+eax\s*,/.test(low) &&
+             low.includes('[rbp -')) {
+      const a = dispRbp(); if (a !== null) cpuState.eax = cpuState.mem[a] ?? 0;
+
+  /* immediate → EAX    (mov eax, IMM) */
+  } else if (op === 'mov' &&
+             /^\s*mov\s+eax\s*,/.test(low) &&
+             !low.includes('[rbp -')) {
+      const m = low.match(/mov\s+eax\s*,\s*(0x[0-9a-f]+|\d+)/);
+      if (m) cpuState.eax = parseInt(m[1], m[1].startsWith('0x') ? 16 : 10);
+
+  /* add imm to EAX     (add eax, IMM) */
+  } else if (op === 'add' && /^\s*add\s+eax\s*,/.test(low)) {
+      const m = low.match(/add\s+eax\s*,\s*(0x[0-9a-f]+|\d+)/);
+      if (m) cpuState.eax = (cpuState.eax +
+              parseInt(m[1], m[1].startsWith('0x') ? 16 : 10)) >>> 0;
+  }
+
+  /* ── FLAGS from cmp / test ------------------------------- */
+  if (op === 'cmp') {
+      const m = low.match(/cmp\s+eax\s*,\s*(0x[0-9a-f]+|\d+|ecx)/);
       if (m) {
-        const addr = parseInt(m[1],16), row = cur.length;
-        ripToAsmRow[addr] = row;
-        if (currentSourceLine!=null) ripToSrcLine[addr] = currentSourceLine;
+        const rhs = m[1] === 'ecx' ? cpuState.ecx
+                                   : parseInt(m[1],
+                                      m[1].startsWith('0x') ? 16 : 10);
+        const a     = cpuState.eax >>> 0,
+              b     = rhs >>> 0,
+              res   = (a - b) >>> 0;
+        cpuState.ZF = res === 0;
+        cpuState.SF = (res >>> 31) & 1;
+        const signA = (a >>> 31) & 1,
+              signB = (b >>> 31) & 1,
+              signR = (res >>> 31) & 1;
+        cpuState.OF = (signA !== signB) && (signR !== signA);
+
+        cpuState.ZF = +cpuState.ZF;
+        cpuState.SF = +cpuState.SF;
+        cpuState.OF = +cpuState.OF;
+        
       }
-      if (/^[A-Za-z_]\w*:$/.test(line)) {
-        const lbl = line.slice(0,-1);
-        if (lbl==='test')  currentSourceLine=2;
-        if (lbl==='main')  currentSourceLine=7;
-      }
-      cur.push(line);
-      asmEditor.setValue(cur.join('\n'));
-      asmEditor.scrollTo(null, asmEditor.getScrollInfo().height);
-    }
+  }
+  if (op === 'test' && /test\s+eax\s*,\s*eax/.test(low)) {
+      cpuState.ZF = cpuState.eax === 0;
+      cpuState.SF = (cpuState.eax >>> 31) & 1;
+      cpuState.OF = false;
+  }
 
-    function extractRipToSourceMap() {
-      ripToSrcLine = {};
-      const lines = asmEditor.getValue().split('\n');
+  /* ── simple prologue / epilogue -------------------------- */
+  if (op === 'push' && low.includes('rbp')) {
+      cpuState.rsp -= 8; w64(cpuState.rsp, cpuState.rbp);
+  } else if (op === 'mov' && low.includes('rbp, rsp')) {
+      cpuState.rbp = cpuState.rsp;
+  } else if (op === 'sub' && low.includes('rsp,')) {
+      const m = low.match(/sub\s+rsp\s*,\s*(0x[0-9a-f]+)/);
+      if (m) cpuState.rsp -= parseInt(m[1], 16);
+  } else if (op === 'leave') {
+      cpuState.rsp = cpuState.rbp;
+      cpuState.rbp = r64(cpuState.rsp);
+      cpuState.rsp += 8;
+  }
 
-      for (const line of lines) {
-        const match = line.match(/^0x([0-9a-f]+):\s+nop\s+dword ptr \[rax \+ 0x([0-9a-f]+)\]/i);
-        if (match) {
-          const rip = parseInt(match[1], 16);
-          const lineNum = parseInt(match[2], 16);
-          if (!isNaN(lineNum)) {
-            ripToSrcLine[rip] = lineNum;
-          }
-        }
-      }
-
-      console.log('✅ ripToSrcLine:', ripToSrcLine);
-    }
-
-
-
-
-
-    function buildInstList() {
-      instructions = Object.keys(ripToAsmRow)
-                           .map(x=>parseInt(x,10))
-                           .sort((a,b)=>a-b);
-      instIndex = 0;
-    }
-
-    function debugInit() {
-      if (!instructions.length || !window.symbolMap?.main) {
-        return alert('Compile & Disasm first (and ensure main() exists).');
-      }
-
-      const mainRip = window.symbolMap.main;
-      instIndex = instructions.findIndex(addr => addr >= mainRip);
-      if (instIndex === -1) instIndex = 0;
-
-      cpuState = {
-        rip: instructions[instIndex],
-        rsp: 0x8000,
-        rbp: 0x8000,
-        stack: []
-      };
-
-      updateRegisters(); updateStack();
-      highlightAsm(cpuState.rip);
-      highlightSrc(ripToSrcLine[cpuState.rip]);
-    }
-
-
-
-    function step() {
-      if (instIndex >= instructions.length) {
-        console.log("✅ Execution finished.");
+  /* ── CALL ------------------------------------------------- */
+  if (op === 'call') {
+      const m = low.match(/call\s+0x([0-9a-f]+)/);
+      if (m) {
+        const tgt = parseInt(m[1], 16);
+        cpuState.rsp -= 8; w64(cpuState.rsp, seqNext);
+        (cpuState.stack ??= []).push(cpuState.rsp);
+        cpuState.rip = tgt;  refreshUI();
+        console.log(`📞 CALL 0x${tgt.toString(16)} (ret→0x${seqNext?.toString(16)})`);
         return;
       }
+  }
 
-      let rip = cpuState.rip;
-      let nextIndex = instructions.indexOf(rip) + 1;
-      const nextRip = instructions[nextIndex];
-      const line = asmEditor.getLine(ripToAsmRow[rip] || 0) || '';
-
-      console.log(`\n▶ STEP at 0x${rip.toString(16)}: ${line.trim()}`);
-      let logAction = '';
-
-      const isCall = line.includes('call') && line.includes('0x');
-      const isRet  = line.startsWith('0x') && line.includes(':	ret');
-
-      if (isCall) {
-        const targetHex = line.match(/call\s+0x([0-9a-f]+)/i);
-        if (targetHex) {
-          const targetRip = parseInt(targetHex[1], 16);
-          cpuState.stack.push(nextRip); // simulate return address
-          cpuState.rip = targetRip;
-          logAction = `CALL → Jumping to 0x${targetRip.toString(16)}, pushed return addr 0x${nextRip.toString(16)}`;
-        }
-      } else if (isRet) {
-        const returnRip = cpuState.stack.pop();
-        if (returnRip == null) {
-          console.log("🔚 RET → stack is empty, program has returned.");
-          cpuState.rip = undefined;
-          instIndex = instructions.length;
-          return;
-        } else {
-          cpuState.rip = returnRip;
-          logAction = `RET → Returning to 0x${returnRip.toString(16)}, stack pop`;
-        }
-
+  /* ── RET -------------------------------------------------- */
+  if (op === 'ret') {
+      if (!cpuState.stack?.length) {
+        cpuState.rip = undefined;            // program done
       } else {
-        cpuState.rip = nextRip;
-        logAction = `Linear → Moving to 0x${nextRip?.toString(16) || '??'}`;
+        const sp  = cpuState.stack.pop();
+        const ret = r64(sp);
+        delete cpuState.mem[sp]; delete cpuState.mem[sp + 4];
+        cpuState.rsp += 8;
+        cpuState.rip = ripToAsmRow[ret] ? ret : undefined;
       }
+      refreshUI(); return;
+  }
 
-      console.log(logAction);
-      console.log(`Stack: [${cpuState.stack.map(x => '0x' + x.toString(16)).join(', ')}]`);
+  /* ── CONDITIONAL JUMPS ----------------------------------- */
+  if (op[0] === 'j' && op !== 'jmp') {
+      const tm = low.match(/0x([0-9a-f]+)/);
+      if (tm) {
+        const tgt  = parseInt(tm[1], 16);
+        const take =
+           (op === 'je'  || op === 'jz')  ?  cpuState.ZF :
+           (op === 'jne' || op === 'jnz') ? !cpuState.ZF :
+           (op === 'jg')                 ? (!cpuState.ZF && (cpuState.SF === cpuState.OF)) :
+           (op === 'jge')                ? (cpuState.SF === cpuState.OF) :
+           (op === 'jl')                 ? (cpuState.SF !== cpuState.OF) :
+           (op === 'jle')                ? (cpuState.ZF || (cpuState.SF !== cpuState.OF)) :
+           false;
 
-      updateRegisters(); updateStack();
-      highlightAsm(cpuState.rip);
-      highlightSrc(ripToSrcLine[cpuState.rip]);
-
-      instIndex = instructions.indexOf(cpuState.rip);
-    }
-
-
-
-
-    // ————————————————— Reset Entire UI —————————————————
-    function resetStepper() {
-      emuHandle = 0;
-      instIndex = 0;
-      ripToAsmRow = {}; ripToSrcLine = {}; currentSourceLine = null;
-      codeBytes = null;
-      instructions = [];
-
-      asmEditor.setValue('');
-      hexEditor.setValue('');
-      cpuEditor.setValue('');
-      editor.getAllMarks().forEach(m=>m.clear());
-
-      cpuState = { rip:textBase, rsp:0x8000, rbp:0x8000, stack:[] };
-      document.getElementById('reg-box').innerHTML = '<strong>Registers</strong>';
-      document.getElementById('stack-box').innerHTML = '<strong>Stack</strong>';
-    }
-
-    // ————————————————— Source/ASM Highlight Helpers —————————————————
-    function highlightAsm(rip) {
-      const row = ripToAsmRow[rip];
-      asmEditor.operation(()=>{
-        asmEditor.getAllMarks().forEach(m=>m.clear());
-        if (row!=null) asmEditor.addLineClass(row,'background','step-highlight');
-        asmEditor.scrollIntoView({line:row,ch:0});
-      });
-    }
-    function highlightSrc(line) {
-      editor.operation(()=>{
-        editor.getAllMarks().forEach(m=>m.clear());
-        if (line!=null) editor.addLineClass(line-1,'background','step-highlight');
-        if (line!=null) editor.scrollIntoView({line:line-1,ch:0});
-      });
-    }
-
-    // ————————————————— Hex Formatter —————————————————
-    function formatHex(buf) {
-      let out = '';
-      for (let i=0; i<buf.length; i+=16) {
-        const chunk = [...buf.slice(i,i+16)]
-          .map(b=>b.toString(16).padStart(2,'0')).join(' ');
-        out += i.toString(16).padStart(4,'0') + ': ' + chunk + '\n';
+        cpuState.rip = take ? tgt : seqNext;
+        console.log(`↪ ${op.toUpperCase()} ${take ? 'taken' : 'not taken'} → 0x${cpuState.rip?.toString(16)}`);
+        refreshUI(); return;
       }
-      return out;
-    }
-  </script>
+  }
+
+  /* ── unconditional jmp ----------------------------------- */
+  if (op === 'jmp') {
+      const m = low.match(/jmp\s+0x([0-9a-f]+)/);
+      if (m) cpuState.rip = parseInt(m[1], 16);
+  }
+
+  /* ── default linear advance ------------------------------ */
+  if (cpuState.rip === rip) cpuState.rip = seqNext;
+
+  /* ── UI --------------------------------------------------- */
+  refreshUI();
+  dbgLine(rip);                               // just executed
+  console.log('i =', cpuState.mem[cpuState.rbp - 0x10]);
+
+  if (cpuState.rip !== rip) {                 // only when the PC moved
+    console.log('NEXT →');
+    dbgLine(cpuState.rip);                    // about to execute
+  }
+
+  /* inner helper – keeps UI calls in one place -------------- */
+  function refreshUI () {
+    updateRegs?.(); updateStack?.();
+    highlightAsm?.(cpuState.rip);
+    highlightSrc?.(ripToSrcLine[cpuState.rip]);
+  }
+}
+
+
+
+
+/* ───────────── UI helpers (registers + stack) ─────────────── */
+function updateUI(){updateRegs();updateStack();}
+function updateRegs(){
+  document.getElementById('reg-box').innerHTML=
+    `<strong>Registers</strong><pre>RIP: ${cpuState.rip?('0x'+cpuState.rip.toString(16)):'HALTED'}
+RSP: 0x${cpuState.rsp.toString(16)}  RBP: 0x${cpuState.rbp.toString(16)}</pre>`;
+}
+function updateStack(){
+  const dump=[];const top=cpuState.rsp+0x40,bottom=cpuState.rsp-0x40;
+  for(let a=top;a>=bottom;a-=8){
+    const empty=cpuState.mem[a]===undefined&&cpuState.mem[a+4]===undefined;
+    const val=empty?'   ??':'0x'+read64(a).toString(16).padStart(16,'0');
+    let mark='';if(a===cpuState.rsp&&a===cpuState.rbp)mark='← RSP, ← RBP';
+    else if(a===cpuState.rsp)mark='← RSP';else if(a===cpuState.rbp)mark='← RBP';
+    dump.push(`0x${a.toString(16).padStart(4,'0')}: ${val} ${mark}`);
+  }
+  document.getElementById('stack-box').innerHTML=`<strong>Stack</strong><pre>${dump.join('\n')}</pre>`;
+}
+
+/* reset ------------------------------------------------------ */
+function resetStepper(){
+  ripToAsmRow={};instructions=[];symbolMap={};asmEditor.setValue('');hexEditor.setValue('');
+  cpuState={};document.getElementById('reg-box').innerHTML='<strong>Registers</strong>';
+  document.getElementById('stack-box').innerHTML='<strong>Stack</strong>';
+}
+
+/* tiny hex helper ------------------------------------------- */
+function formatHex(buf){
+  let out='';for(let i=0;i<buf.length;i+=16){
+    out+=i.toString(16).padStart(4,'0')+': '+[...buf.slice(i,i+16)].map(b=>b.toString(16).padStart(2,'0')).join(' ')+'\n';
+  }return out;
+}
+</script>
 </body>
 </html>
