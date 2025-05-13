@@ -75,6 +75,7 @@ let ripToAsmRow={},ripToSrcLine={},srcLineToRIPs={};
 let instructions=[],codeBytes=null,currentSourceLine=null;
 let cpuState={};            // filled in debugInit()
 let symbolMap={};
+let varNameMap = {};
 
 /* ─────────────────── util logging helper ─────────────────── */
 const log=(tag,...m)=>console.log(tag,...m);
@@ -112,17 +113,13 @@ int main(){ volatile int in=3; int r=foo(in); return r; }`);
 };
 
 /* inject NOP markers so we can map → source line */
-function injectMarkers (src) {
-  const out = [];
-  src.split('\n').forEach((ln, i) => {
-    if (ln.trim() !== '') {                          // <─ new guard
-      out.push(`__asm__(".byte 0x0F,0x1F,0x40,${Math.min(i+1,255)}");`);
-    }
-    out.push(ln);
-  });
-  return out.join('\n');
+function injectMarkers(src) {
+  return src.split('\n').map((ln, i) => {
+    const idx = Math.min(i+1, 255);
+    // Emit a unique 4-byte “nop” marker before every line
+    return `__asm__(".byte 0x0F,0x1F,0x40,${idx}");\n${ln}`;
+  }).join('\n');
 }
-
 
 
 /* ──────────────────────────────────────────────────────────
@@ -184,40 +181,84 @@ async function compileAndDisasm(){
   }catch(e){console.warn('symbol extract failed',e)}
 
   /* ─ disassemble ─ */
-  disasmFunc(codeBytes,codeBytes.length,textBase);
-  setTimeout(()=>{buildInstList();},5);          // let appendAsm finish
+  disasmFunc(codeBytes, codeBytes.length, textBase);
+  setTimeout(() => {
+    buildInstList();
+    buildVarMap();      // ← new
+  }, 5);
+
 }
+
+
+function buildVarMap() {
+  varNameMap = {};
+  // for each instruction we know the RIP → srcLine
+  for (const [ripStr, srcLine] of Object.entries(ripToSrcLine)) {
+    const rip = +ripStr;
+    const asmRow = ripToAsmRow[rip];
+    const asmLine = asmEditor.getLine(asmRow) || "";
+    // look for the "store EAX → local" pattern
+    const m = asmLine.match(
+      /mov\s+dword ptr\s*\[rbp\s*-\s*(0x[0-9a-f]+|\d+)\]\s*,\s*eax/i
+    );
+    if (!m) continue;
+    // parse the offset
+    const offset = parseInt(m[1], m[1].startsWith("0x") ? 16 : 10);
+    // pull the declaration line from the C editor
+    const decl = editor.getLine(srcLine - 1).trim();
+    // simple regex for "type name" – tweak if you need other types
+    const nm = decl.match(
+      /\b(?:unsigned\s+)?(?:int|char|long|float|double|volatile)\s+([A-Za-z_]\w*)/
+    );
+    if (nm) {
+      varNameMap[offset] = nm[1];
+    }
+  }
+  console.log("LOCALS MAP", varNameMap);
+}
+
 
 
 // put this just once, outside appendAsm
 let currentSrcLine = null;
 
 /* appendAsm callback (patched) */
-function appendAsm (line) {
+function appendAsm(line) {
   line = line.trim();
   if (!line) return;
 
+  // split out existing lines to avoid duplicates
   const out = asmEditor.getValue().split('\n');
   if (out.includes(line)) return;
 
-  /* rip of *this* line */
-  const m  = line.match(/^0x([0-9a-f]+):/);
-  if (!m) return;
-  const rip = parseInt(m[1], 16);
+  // extract the instruction address (RIP)
+  const addrM = line.match(/^0x([0-9a-fA-F]+):/);
+  if (!addrM) return;
+  const rip = parseInt(addrM[1], 16);
   ripToAsmRow[rip] = out.length;
 
-  /* ── did we just print a marker? ───────────────────────── */
-  const mark = line.match(/nop\s+dword ptr \[rax \+ (\d+)\]/i);
-  if (mark) currentSrcLine = parseInt(mark[1], 10);   // 1-based
+  // look for our injected NOP-marker: `nop dword ptr [rax + N]`
+  // where N might be decimal ("10") or hex ("0xa")
+  const markM = line.match(
+    /nop\s+dword ptr\s*\[\s*rax\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*\]/i
+  );
+  if (markM) {
+    const tok = markM[1];
+    // parse hex or decimal
+    currentSrcLine = tok.startsWith('0x')
+      ? parseInt(tok, 16)
+      : parseInt(tok, 10);
+  }
 
-  /* “stick” the latest src-line to *every* instruction */
-  if (currentSrcLine != null) ripToSrcLine[rip] = currentSrcLine;
+  // associate this RIP → source‐line (if we have one)
+  if (currentSrcLine != null) {
+    ripToSrcLine[rip] = currentSrcLine;
+  }
 
+  // append and re-write the disassembly panel
   out.push(line);
   asmEditor.setValue(out.join('\n'));
 }
-
-
 
 
 /* build linear instruction list */
@@ -231,7 +272,15 @@ function debugInit(){
   if(!codeBytes)return alert('Compile first!');
   const start=(symbolMap.main??0)+textBase;
 
-  cpuState={rip:start,rsp:0x8000,rbp:0x8000,mem:{},stack:[],eax:0,ecx:0, ZF:false,SF:false};
+  cpuState = {		
+    rip:start, rsp:0x8000, rbp:0x8000,		
+    eax:0, ecx:0,		
+    rdi:0, // ← add (or keep edi if you prefer 32-bit)		
+    ZF:false, SF:false, OF:false,		
+    mem:{}, stack:[]		
+  };
+
+
   updateUI();
   log(`DBG start at 0x${start.toString(16)}`);
 }
@@ -287,177 +336,208 @@ ASM  L${asmRow ?? '-'}\t: ${asmTxt}
 }
 
 
-/* ─────────────────────────────────────────────────────────────
- *  step() – single-step pseudo-CPU interpreter
- * ------------------------------------------------------------------ */
 function step () {
   /* ── HALT guard ─────────────────────────────────────────── */
   if (cpuState.rip === undefined) {
-    console.log('🚫 HALT – no further instructions'); return;
+    console.log('🚫 HALT – no further instructions');
+    return;
   }
 
   /* ── fetch current instruction --------------------------- */
   if (!cpuState.mem) cpuState.mem = {};
-  const rip   = cpuState.rip;
-  const row   = ripToAsmRow[rip];
-  const asmLn = row != null ? asmEditor.getLine(row) : '';
-  const body  = (asmLn.split(':')[1] ?? asmLn).trim();
-  const low   = body.toLowerCase();
-  const op    = low.split(/\s+/)[0] || '';
+  const rip    = cpuState.rip;
+  const row    = ripToAsmRow[rip];
+  const asmLn  = row != null ? asmEditor.getLine(row) : '';
+  const body   = (asmLn.split(':')[1] ?? asmLn).trim();
+  const low    = body.toLowerCase();
+  const op     = low.split(/\s+/)[0] || '';
 
-  const idx      = instructions.indexOf(rip);
-  const seqNext  = instructions[idx + 1];        // REAL fall-through
+  const idx     = instructions.indexOf(rip);
+  const seqNext = instructions[idx + 1];  // fall-through
 
   console.log(`STEP 0x${rip.toString(16)}  ${body}`);
 
   /* ── helpers --------------------------------------------- */
   const dispRbp = () => {
     const m = low.match(/\[rbp\s*-\s*(0x[0-9a-f]+|\d+)\]/i);
-    return m ? cpuState.rbp -
-               parseInt(m[1], m[1].startsWith('0x') ? 16 : 10) : null;
+    return m
+      ? cpuState.rbp - parseInt(m[1], m[1].startsWith('0x') ? 16 : 10)
+      : null;
   };
-  const w64 = (a,v)=>{cpuState.mem[a]=v&0xffffffff;
-                      cpuState.mem[a+4]=(v>>>32)&0xffffffff;};
-  const r64 = a =>  (cpuState.mem[a]??0) |
-                   ((cpuState.mem[a+4]??0) << 32);
+  const w64 = (a, v) => {
+    cpuState.mem[a]   = v & 0xffffffff;
+    cpuState.mem[a+4] = (v >>> 32) & 0xffffffff;
+  };
+  const r64 = a =>
+    (cpuState.mem[a] ?? 0)
+    | ((cpuState.mem[a+4] ?? 0) << 32);
 
   /* ── MOV / ADD we actually need -------------------------- */
-  /* store EAX → local  (mov dword ptr [rbp-X], eax) */
   if (op === 'mov' && low.includes('[rbp -') && /,\s*eax\s*$/.test(low)) {
-      const a = dispRbp(); if (a !== null) cpuState.mem[a] = cpuState.eax;
+    // store EAX → local
+    const a = dispRbp();
+    if (a !== null) cpuState.mem[a] = cpuState.eax;
 
-  /* load local → EAX   (mov eax, dword ptr [rbp-X]) */
   } else if (op === 'mov' &&
              /^\s*mov\s+eax\s*,/.test(low) &&
              low.includes('[rbp -')) {
-      const a = dispRbp(); if (a !== null) cpuState.eax = cpuState.mem[a] ?? 0;
+    // load local → EAX
+    const a = dispRbp();
+    if (a !== null) cpuState.eax = cpuState.mem[a] ?? 0;
 
-  /* immediate → EAX    (mov eax, IMM) */
+  } else if (op === 'mov' &&
+             /^\s*mov\s+ecx\s*,/.test(low) &&
+             low.includes('[rbp -')) {
+    // load local → ECX
+    const a = dispRbp();
+    if (a !== null) cpuState.ecx = cpuState.mem[a] ?? 0;
+
   } else if (op === 'mov' &&
              /^\s*mov\s+eax\s*,/.test(low) &&
              !low.includes('[rbp -')) {
-      const m = low.match(/mov\s+eax\s*,\s*(0x[0-9a-f]+|\d+)/);
-      if (m) cpuState.eax = parseInt(m[1], m[1].startsWith('0x') ? 16 : 10);
+    // immediate → EAX
+    const m = low.match(/mov\s+eax\s*,\s*(0x[0-9a-f]+|\d+)/);
+    if (m) cpuState.eax = parseInt(m[1], m[1].startsWith('0x') ? 16 : 10);
 
-  /* add imm to EAX     (add eax, IMM) */
+  } else if (op === 'add' && /^\s*add\s+eax\s*,\s*ecx/.test(low)) {
+    // add ECX → EAX
+    cpuState.eax = (cpuState.eax + cpuState.ecx) >>> 0;
+
   } else if (op === 'add' && /^\s*add\s+eax\s*,/.test(low)) {
-      const m = low.match(/add\s+eax\s*,\s*(0x[0-9a-f]+|\d+)/);
-      if (m) cpuState.eax = (cpuState.eax +
-              parseInt(m[1], m[1].startsWith('0x') ? 16 : 10)) >>> 0;
+    // add immediate → EAX
+    const m = low.match(/add\s+eax\s*,\s*(0x[0-9a-f]+|\d+)/);
+    if (m) cpuState.eax = (cpuState.eax +
+             parseInt(m[1], m[1].startsWith('0x') ? 16 : 10)) >>> 0;
+
+  /* ── RDI/EDI rules ───────────────────────────────────────── */
+  } else if (op === 'mov' && /mov\s+eax\s*,\s*(r|e)di/.test(low)) {
+    cpuState.eax = (cpuState.rdi ?? cpuState.edi) >>> 0;
+
+  } else if (op === 'mov' && /mov\s+(r|e)di\s*,\s*eax/.test(low)) {
+    cpuState.rdi = cpuState.eax >>> 0;
+
+  } else if (op === 'mov' && /mov\s+rdi\s*,\s*rax/.test(low)) {
+    cpuState.rdi = cpuState.eax >>> 0;
+    console.log('↪  RDI now = 0x' + cpuState.rdi.toString(16));
+
+  } else if (op === 'mov' && /mov\s+(r|e)di\s*,\s*(0x[0-9a-f]+|\d+)/.test(low)) {
+    const m = low.match(/mov\s+(?:r|e)di\s*,\s*(0x[0-9a-f]+|\d+)/);
+    cpuState.rdi = parseInt(m[1], m[1].startsWith('0x') ? 16 : 10) >>> 0;
   }
 
   /* ── FLAGS from cmp / test ------------------------------- */
   if (op === 'cmp') {
-      const m = low.match(/cmp\s+eax\s*,\s*(0x[0-9a-f]+|\d+|ecx)/);
-      if (m) {
-        const rhs = m[1] === 'ecx' ? cpuState.ecx
-                                   : parseInt(m[1],
-                                      m[1].startsWith('0x') ? 16 : 10);
-        const a     = cpuState.eax >>> 0,
-              b     = rhs >>> 0,
-              res   = (a - b) >>> 0;
-        cpuState.ZF = res === 0;
-        cpuState.SF = (res >>> 31) & 1;
-        const signA = (a >>> 31) & 1,
-              signB = (b >>> 31) & 1,
-              signR = (res >>> 31) & 1;
-        cpuState.OF = (signA !== signB) && (signR !== signA);
-
-        cpuState.ZF = +cpuState.ZF;
-        cpuState.SF = +cpuState.SF;
-        cpuState.OF = +cpuState.OF;
-        
-      }
+    const m = low.match(/cmp\s+eax\s*,\s*(0x[0-9a-f]+|\d+|ecx)/);
+    if (m) {
+      const rhs = m[1] === 'ecx'
+                  ? cpuState.ecx
+                  : parseInt(m[1], m[1].startsWith('0x') ? 16 : 10);
+      const a   = cpuState.eax >>> 0,
+            b   = rhs >>> 0,
+            res = (a - b) >>> 0;
+      cpuState.ZF = +(res === 0);
+      cpuState.SF = +((res >>> 31) & 1);
+      const signA = (a >>> 31) & 1,
+            signB = (b >>> 31) & 1,
+            signR = (res >>> 31) & 1;
+      cpuState.OF = +(signA !== signB && signR !== signA);
+    }
   }
   if (op === 'test' && /test\s+eax\s*,\s*eax/.test(low)) {
-      cpuState.ZF = cpuState.eax === 0;
-      cpuState.SF = (cpuState.eax >>> 31) & 1;
-      cpuState.OF = false;
+    cpuState.ZF = +(cpuState.eax === 0);
+    cpuState.SF = +((cpuState.eax >>> 31) & 1);
+    cpuState.OF = 0;
   }
 
-  /* ── simple prologue / epilogue -------------------------- */
+  /* ── prologue / epilogue ---------------------------------- */
   if (op === 'push' && low.includes('rbp')) {
-      cpuState.rsp -= 8; w64(cpuState.rsp, cpuState.rbp);
+    cpuState.rsp -= 8; w64(cpuState.rsp, cpuState.rbp);
   } else if (op === 'mov' && low.includes('rbp, rsp')) {
-      cpuState.rbp = cpuState.rsp;
+    cpuState.rbp = cpuState.rsp;
   } else if (op === 'sub' && low.includes('rsp,')) {
-      const m = low.match(/sub\s+rsp\s*,\s*(0x[0-9a-f]+)/);
-      if (m) cpuState.rsp -= parseInt(m[1], 16);
+    const m = low.match(/sub\s+rsp\s*,\s*(0x[0-9a-f]+)/);
+    if (m) cpuState.rsp -= parseInt(m[1], 16);
   } else if (op === 'leave') {
-      cpuState.rsp = cpuState.rbp;
-      cpuState.rbp = r64(cpuState.rsp);
-      cpuState.rsp += 8;
+    cpuState.rsp = cpuState.rbp;
+    cpuState.rbp = r64(cpuState.rsp);
+    cpuState.rsp += 8;
   }
 
   /* ── CALL ------------------------------------------------- */
   if (op === 'call') {
-      const m = low.match(/call\s+0x([0-9a-f]+)/);
-      if (m) {
-        const tgt = parseInt(m[1], 16);
-        cpuState.rsp -= 8; w64(cpuState.rsp, seqNext);
-        (cpuState.stack ??= []).push(cpuState.rsp);
-        cpuState.rip = tgt;  refreshUI();
-        console.log(`📞 CALL 0x${tgt.toString(16)} (ret→0x${seqNext?.toString(16)})`);
-        return;
-      }
+    const m = low.match(/call\s+0x([0-9a-f]+)/);
+    if (m) {
+      const tgt = parseInt(m[1], 16);
+      cpuState.rsp -= 8; w64(cpuState.rsp, seqNext);
+      (cpuState.stack ??= []).push(cpuState.rsp);
+      cpuState.rip = tgt; refreshUI();
+      console.log(`📞 CALL 0x${tgt.toString(16)} (ret→0x${seqNext?.toString(16)})`);
+      return;
+    }
   }
 
   /* ── RET -------------------------------------------------- */
   if (op === 'ret') {
-      if (!cpuState.stack?.length) {
-        cpuState.rip = undefined;            // program done
-      } else {
-        const sp  = cpuState.stack.pop();
-        const ret = r64(sp);
-        delete cpuState.mem[sp]; delete cpuState.mem[sp + 4];
-        cpuState.rsp += 8;
-        cpuState.rip = ripToAsmRow[ret] ? ret : undefined;
-      }
-      refreshUI(); return;
+    if (!cpuState.stack?.length) {
+      cpuState.rip = undefined;
+    } else {
+      const sp  = cpuState.stack.pop();
+      const ret = r64(sp);
+      delete cpuState.mem[sp]; delete cpuState.mem[sp+4];
+      cpuState.rsp += 8;
+      cpuState.rip = ripToAsmRow[ret] ? ret : undefined;
+    }
+    refreshUI(); return;
   }
 
-  /* ── CONDITIONAL JUMPS ----------------------------------- */
+  /* ── conditional & jmp ----------------------------------- */
   if (op[0] === 'j' && op !== 'jmp') {
-      const tm = low.match(/0x([0-9a-f]+)/);
-      if (tm) {
-        const tgt  = parseInt(tm[1], 16);
-        const take =
-           (op === 'je'  || op === 'jz')  ?  cpuState.ZF :
-           (op === 'jne' || op === 'jnz') ? !cpuState.ZF :
-           (op === 'jg')                 ? (!cpuState.ZF && (cpuState.SF === cpuState.OF)) :
-           (op === 'jge')                ? (cpuState.SF === cpuState.OF) :
-           (op === 'jl')                 ? (cpuState.SF !== cpuState.OF) :
-           (op === 'jle')                ? (cpuState.ZF || (cpuState.SF !== cpuState.OF)) :
-           false;
-
-        cpuState.rip = take ? tgt : seqNext;
-        console.log(`↪ ${op.toUpperCase()} ${take ? 'taken' : 'not taken'} → 0x${cpuState.rip?.toString(16)}`);
-        refreshUI(); return;
-      }
+    const tm = low.match(/0x([0-9a-f]+)/);
+    if (tm) {
+      const tgt = parseInt(tm[1], 16);
+      const take =
+         (op==='je'||op==='jz')   ? cpuState.ZF :
+         (op==='jne'||op==='jnz') ? !cpuState.ZF :
+         (op==='jg')              ? (!cpuState.ZF && cpuState.SF===cpuState.OF) :
+         (op==='jge')             ? (cpuState.SF===cpuState.OF) :
+         (op==='jl')              ? (cpuState.SF!==cpuState.OF) :
+         (op==='jle')             ? (cpuState.ZF||cpuState.SF!==cpuState.OF) :
+         false;
+      cpuState.rip = take ? tgt : seqNext;
+      console.log(`↪ ${op.toUpperCase()} ${take?'taken':'not taken'} → 0x${cpuState.rip.toString(16)}`);
+      refreshUI(); return;
+    }
   }
-
-  /* ── unconditional jmp ----------------------------------- */
   if (op === 'jmp') {
-      const m = low.match(/jmp\s+0x([0-9a-f]+)/);
-      if (m) cpuState.rip = parseInt(m[1], 16);
+    const m = low.match(/jmp\s+0x([0-9a-f]+)/);
+    if (m) cpuState.rip = parseInt(m[1], 16);
   }
 
-  /* ── default linear advance ------------------------------ */
+  /* ── fall-through & end-of-step ─────────────────────────── */
   if (cpuState.rip === rip) cpuState.rip = seqNext;
 
-  /* ── UI --------------------------------------------------- */
   refreshUI();
-  dbgLine(rip);                               // just executed
-  console.log('i =', cpuState.mem[cpuState.rbp - 0x10]);
+  dbgLine(rip);
 
-  if (cpuState.rip !== rip) {                 // only when the PC moved
-    console.log('NEXT →');
-    dbgLine(cpuState.rip);                    // about to execute
+  // print named locals if we built varNameMap
+  if (Object.keys(varNameMap).length) {
+    console.log(
+      Object.entries(varNameMap)
+            .map(([off, name]) => {
+              const v = cpuState.mem[cpuState.rbp - off];
+              return `${name}=[rbp-${off}] = ${v===undefined? "(undef)" : v}`;
+            })
+            .join(", ")
+    );
   }
 
-  /* inner helper – keeps UI calls in one place -------------- */
-  function refreshUI () {
-    updateRegs?.(); updateStack?.();
+  if (cpuState.rip !== rip) {
+    console.log('NEXT →'); dbgLine(cpuState.rip);
+  }
+
+  function refreshUI() {
+    updateRegs?.();
+    updateStack?.();
     highlightAsm?.(cpuState.rip);
     highlightSrc?.(ripToSrcLine[cpuState.rip]);
   }
@@ -466,13 +546,26 @@ function step () {
 
 
 
+
+
+
+
+
 /* ───────────── UI helpers (registers + stack) ─────────────── */
 function updateUI(){updateRegs();updateStack();}
-function updateRegs(){
-  document.getElementById('reg-box').innerHTML=
-    `<strong>Registers</strong><pre>RIP: ${cpuState.rip?('0x'+cpuState.rip.toString(16)):'HALTED'}
-RSP: 0x${cpuState.rsp.toString(16)}  RBP: 0x${cpuState.rbp.toString(16)}</pre>`;
+function updateRegs () {
+  document.getElementById('reg-box').innerHTML =
+    `<strong>Registers</strong><pre>
+RIP: ${cpuState.rip !== undefined ? '0x'+cpuState.rip.toString(16) : 'HALTED'}
+RSP: 0x${cpuState.rsp.toString(16)}    RBP: 0x${cpuState.rbp.toString(16)}
+
+EAX: 0x${cpuState.eax.toString(16).padStart(8,'0')}
+ECX: 0x${cpuState.ecx.toString(16).padStart(8,'0')}
+RDI: 0x${cpuState.rdi.toString(16).padStart(16,'0')}
+</pre>`;
 }
+
+
 function updateStack(){
   const dump=[];const top=cpuState.rsp+0x40,bottom=cpuState.rsp-0x40;
   for(let a=top;a>=bottom;a-=8){
