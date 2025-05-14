@@ -51,6 +51,8 @@ typedef struct {
     uint64_t st_size;
 } Elf64_Sym;
 
+
+
 EMSCRIPTEN_KEEPALIVE
 uint8_t* compile_and_get_text(const char* source_path, int* out_size) {
     fprintf(stderr, "[TCC] Creating compiler state...\n");
@@ -61,11 +63,12 @@ uint8_t* compile_and_get_text(const char* source_path, int* out_size) {
     }
 
     tcc_set_output_type(s, TCC_OUTPUT_OBJ);
+    tcc_set_options(s, "-O0");  // ✔ Disable optimization
     tcc_add_include_path(s, "/");
     tcc_add_include_path(s, "/tinycc-headers");
 
-    // 🛠️ Set base address for .text section
-    //tcc_set_section_address(s, ".text", 0x1000);
+    // ✅ Set proper base address BEFORE generating object
+    //tcc_set_section_address(s, ".text", 0x2000);
 
     fprintf(stderr, "[TCC] Adding source file: %s\n", source_path);
     if (tcc_add_file(s, source_path) < 0) {
@@ -83,7 +86,7 @@ uint8_t* compile_and_get_text(const char* source_path, int* out_size) {
 
     tcc_delete(s);
 
-    // ✅ Read back ELF file and extract .text
+    // ✅ Read ELF file and extract .text section
     FILE *f = fopen("out.o", "rb");
     if (!f) {
         fprintf(stderr, "[TCC] fopen(out.o) failed\n");
@@ -105,12 +108,13 @@ uint8_t* compile_and_get_text(const char* source_path, int* out_size) {
         const char *name = strtab + sh[i].sh_name;
         if (strncmp(name, ".text", 5) == 0) {
             fprintf(stderr, "[TCC] ✅ Extracting section '%s'\n", name);
+
             int sz = sh[i].sh_size;
             uint8_t *out = malloc(sz);
             memcpy(out, elf + sh[i].sh_offset, sz);
             *out_size = sz;
-            g_text_base = sh[i].sh_addr;
-            if (g_text_base == 0) g_text_base = 0x1000;
+            // g_text_base = sh[i].sh_addr;
+            g_text_base = 0x2000; // force base for debugger + disasm
 
             fprintf(stderr, "[TCC] .text virtual address: 0x%llx\n", (unsigned long long)g_text_base);
             free(elf);
@@ -122,6 +126,7 @@ uint8_t* compile_and_get_text(const char* source_path, int* out_size) {
     free(elf);
     return NULL;
 }
+
 
 
 EMSCRIPTEN_KEEPALIVE

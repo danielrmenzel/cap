@@ -2,8 +2,10 @@
 #include <stdio.h>
 #include <inttypes.h>
 #include <capstone/capstone.h>
+#include <emscripten/emscripten.h>
 
-void disasm_x86(const uint8_t *code, size_t code_size) {
+EMSCRIPTEN_KEEPALIVE
+void disasm_x86(const uint8_t *code, size_t code_size, unsigned base_addr) {
     csh handle;
     cs_insn *insn;
     size_t count;
@@ -11,7 +13,7 @@ void disasm_x86(const uint8_t *code, size_t code_size) {
     if (cs_open(CS_ARCH_X86, CS_MODE_64, &handle) != CS_ERR_OK)
         return;
 
-    count = cs_disasm(handle, code, code_size, 0x1000, 0, &insn);
+    count = cs_disasm(handle, code, code_size, base_addr, 0, &insn);
 
     if (count > 0) {
         for (size_t i = 0; i < count; i++) {
