@@ -11,24 +11,115 @@
       href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/dracula.min.css"/>
 
 <style>
- html,body{height:100%;margin:0;padding:0;background:#282a36;color:#f8f8f2;font-family:sans-serif}
- body{display:flex;flex-direction:column;padding:16px;gap:12px}
- .editor-container{height:200px;border:1px solid #44475a;resize:vertical;overflow:hidden}
- .CodeMirror{width:100%;height:100%;font-family:monospace;font-size:14px}
- .step-highlight{background:rgba(80,250,123,.2)!important}
- .line-highlight{background:rgba(80,250,123,.2)!important}
- .button-row{display:flex;gap:8px;flex-wrap:wrap}
- button{background:#6272a4;color:#f8f8f2;border:none;padding:6px 12px;cursor:pointer}
- #cpu-visual{display:flex;gap:16px;margin-top:12px}
- #reg-box,#stack-box{background:#44475a;padding:8px;font-family:monospace;
-                     color:#f8f8f2;overflow:auto;max-height:200px}
- #reg-box{flex:0 0 200px}
- #stack-box{flex:1;border-left:1px solid #6272a4;padding-left:12px}
+ html, body {
+   height: 100%;
+   margin: 0;
+   padding: 0;
+   background: #282a36;
+   color: #f8f8f2;
+   font-family: sans-serif;
+ }
+
+ body {
+   display: flex;
+   flex-direction: column;
+   padding: 16px;
+   gap: 12px;
+ }
+
+ .editor-container {
+   height: 200px;
+   border: 1px solid #44475a;
+   resize: vertical;
+   overflow: hidden;
+ }
+
+ .CodeMirror {
+   width: 100%;
+   height: 100%;
+   font-family: monospace;
+   font-size: 14px;
+ }
+
+ .step-highlight {
+   background: rgba(80, 250, 123, 0.2) !important;
+ }
+
+ .line-highlight {
+   background-color: rgba(80, 250, 123, 0.4) !important;
+   border-left: 3px solid #50fa7b;
+ }
+
+ .CodeMirror .line-highlight {
+   background-color: rgba(80, 250, 123, 0.4) !important;
+   border-left: 3px solid #50fa7b;
+ }
+
+ .label {
+  color: #ffb86c;
+  font-weight: bold;
+}
+
+
+ .button-row {
+   display: flex;
+   gap: 8px;
+   flex-wrap: wrap;
+ }
+
+ button {
+   background: #6272a4;
+   color: #f8f8f2;
+   border: none;
+   padding: 6px 12px;
+   cursor: pointer;
+ }
+#grid-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: auto auto;
+  gap: 16px;
+  align-items: stretch; /* 📌 ensures all items in a row match height */
+}
+
+.grid-cell {
+  display: flex;
+  flex-direction: column;
+  background: #1e1f29;
+  border: 1px solid #44475a;
+  padding: 8px;
+  overflow: hidden;
+}
+
+
+ #cpu-visual {
+   display: flex;
+   gap: 16px;
+   margin-top: 12px;
+ }
+
+ #reg-box, #stack-box {
+   background: #44475a;
+   padding: 8px;
+   font-family: monospace;
+   color: #f8f8f2;
+   overflow: auto;
+   max-height: 200px;
+ }
+
+ #reg-box {
+   flex: 0 0 200px;
+ }
+
+ #stack-box {
+   flex: 1;
+   border-left: 1px solid #6272a4;
+   padding-left: 12px;
+ }
 </style>
+
 </head>
 <body>
-<h2>1. Enter C Code</h2>
-<div class="editor-container"><textarea id="editor"></textarea></div>
 
 <div class="button-row">
   <button onclick="log('Compile & Disasm button pushed'), compileAndDisasm()">Compile & Disasm</button>
@@ -36,21 +127,42 @@
   <button onclick="log('Step button pushed'), step()">Step</button>
   <button onclick="log('Step Into button pushed'), stepInto()">Step into</button>
   <button onclick="log('Reset button pushed'), resetStepper()">Reset</button>
+  <button onclick="log('Step C Line button pushed'), stepC()">Step C Line</button>
+
 </div>
 
-<h2>2. Hex Output</h2>
-<div class="editor-container" style="height:100px"><textarea id="hex-editor"></textarea></div>
+<div id="grid-layout">
+  <!-- 1. Enter C Code -->
+  <div class="grid-cell">
+    <h2>1. Enter C Code</h2>
+    <div class="editor-container"><textarea id="editor"></textarea></div>
+  </div>
 
-<h2>3. Disassembly</h2>
-<div class="editor-container" style="height:150px"><textarea id="asm-editor"></textarea></div>
+  <!-- 2. Hex Output -->
+  <div class="grid-cell">
+    <h2>2. Hex Output</h2>
+    <div class="editor-container" style="height: 100px;"><textarea id="hex-editor"></textarea></div>
+  </div>
 
-<h2>4. CPU State</h2>
-<div class="editor-container" style="height:150px"><textarea id="cpu-editor"></textarea></div>
+  <!-- 3. Disassembly -->
+  <div class="grid-cell">
+    <h2>3. Disassembly</h2>
+    <div class="editor-container" style="height: 150px;"><textarea id="asm-editor"></textarea></div>
+  </div>
 
-<div id="cpu-visual">
-  <div id="reg-box"><strong>Registers</strong></div>
-  <div id="stack-box"><strong>Stack</strong></div>
+  <!-- 4. CPU State -->
+  <div class="grid-cell">
+    <h2>4. CPU State</h2>
+    <div class="editor-container" style="height: 150px;"><textarea id="cpu-editor"></textarea></div>
+    <div id="cpu-visual" style="margin-top: 8px;">
+      <div id="reg-box"><strong>Registers</strong></div>
+      <div id="stack-box"><strong>Stack</strong></div>
+    </div>
+  </div>
 </div>
+
+
+
 
 <!-- Capstone module ----------------------------------------------------->
 <script type="module">
@@ -58,10 +170,59 @@ import createCapstoneModule from '../libs/build-wrapper/capstone.js';
 window.createCapstoneModule = createCapstoneModule;
 </script>
 
-<!-- TinyCC (WASM) ------------------------------------------------------->
+
+
+<!-- TinyCC (WASM) – UMD build ------------------------------------------->
+<!-- NOTE: no type="module" here – let the browser treat it as classic JS -->
+<script src="../libs/tinycc/tinycc/build-wasm/tcc.js" defer></script>
+<!-- your existing fallback wrapper -->
 <script type="module">
-import('../libs/build-tcc/tcc.mjs').then(m=>window._createTCC=m.default);
+if (!window.createTCC)
+  throw new Error('TinyCC factory not found – did the <script> load?');
+
+/* PATCH: give every call a locateFile so tcc.data + tcc.wasm land in the right dir */
+window._createTCC = (userOpts = {}) =>
+  window.createTCC({
+    locateFile: p =>
+      /(?:\.wasm|\.data)$/.test(p)
+        ? '../libs/tinycc/tinycc/build-wasm/' + p   // real folder
+        : p,
+    ...userOpts
+  });
 </script>
+
+
+
+<script type="module">
+(async () => {
+  const TCC = await window._createTCC();
+  console.log('✓ TinyCC factory resolved');
+
+  const src = 'int main(){ return 42; }';
+  TCC.FS.writeFile('x.c', src);
+
+  const lenPtr = TCC._malloc(4);
+  const textPtr = TCC.ccall('compile_and_get_text', 'number',
+                            ['string','number'],
+                            ['x.c', lenPtr]);
+  const size   = TCC.HEAP32[lenPtr>>2];
+  TCC._free(lenPtr);
+
+  console.log('compiled .text size', size);
+})();
+</script>
+
+
+
+<script type="module">
+/* tiny helper TinyCC → JS */
+export function tccConsole(str) {
+  const el = document.getElementById('console');
+  el.textContent += str;       // no newline here – printf() supplies it
+}
+</script>
+
+<!-- /home/dan/master_thesis/cap_mob/libs/tinycc/tinycc/build-wasm/tcc.js -->
 
 <!-- CodeMirror ---------------------------------------------------------->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
@@ -75,6 +236,19 @@ let capstoneModule,disasmFunc,tccModule;
 let ripToAsmRow={},ripToSrcLine={},srcLineToRIPs={};
 let instructions=[],codeBytes=null,currentSourceLine=null;
 let cpuState={};            // filled in debugInit()
+let ripToLabel = {};
+
+//let ripToAsmRow = {};
+//let ripToSrcLine = {};
+//let srcLineToRIPs = {};
+//let currentSourceLine = null;
+window.realToOriginalLineMap = new Map();
+
+
+/* ─── after you declare cpuState ─── */
+const REGNAMES32 = ['eax','ebx','ecx','edx','esi','edi',
+                    'esp','ebp','eip'];        // <- new
+
 let symbolMap={};
 let varNameMap = {};
 let varNameStack = [];
@@ -85,6 +259,18 @@ const log=(tag,...m)=>console.log(tag,...m);
 /* ─────────────────── helpers for 64-bit mem ───────────────── */
 function write64(a,v){cpuState.mem[a]=v&0xffffffff;cpuState.mem[a+4]=(v>>>32)&0xffffffff}
 function read64(a){return (cpuState.mem[a]??0)|((cpuState.mem[a+4]??0)<<32)}
+/* ---- tiny helpers so 32-bit & 64-bit stay coherent ---- */
+function sync64to32() {
+  cpuState.eip = cpuState.rip & 0xFFFF_FFFF;
+  cpuState.esp = cpuState.rsp & 0xFFFF_FFFF;
+  cpuState.ebp = cpuState.rbp & 0xFFFF_FFFF;
+}
+function sync32to64() {
+  cpuState.rip = (cpuState.eip|0) >>> 0;
+  cpuState.rsp = (cpuState.esp|0) >>> 0;
+  cpuState.rbp = (cpuState.ebp|0) >>> 0;
+}
+
 
 /* mnemonic + misc helpers */
 function mnem(line){return (line.split(':')[1]||'').trim().split(/\s+/)[0]?.toLowerCase()||''}
@@ -114,14 +300,64 @@ int main(){ volatile int in=3; int r=foo(in); return r; }`);
   log('✅ Capstone ready');
 };
 
-/* inject NOP markers so we can map → source line */
-function injectMarkers(src) {
-  return src.split('\n').map((ln, i) => {
-    const idx = Math.min(i+1, 255);
-    // Emit a unique 4-byte “nop” marker before every line
-    return `__asm__(".byte 0x0F,0x1F,0x40,${idx}");\n${ln}`;
-  }).join('\n');
+function findClosestSrcLine(rip) {
+  let closest = null;
+  for (const key in ripToSrcLine) {
+    const r = parseInt(key);
+    if (r <= rip) {
+      if (closest === null || r > closest)
+        closest = r;
+    }
+  }
+  return ripToSrcLine[closest];
 }
+
+
+
+/* inject NOP markers so we can map → source line */
+/* ───────── inject NOP markers so we can map RIP → source line ───────── */
+function injectMarkers(src) {
+  const lines = src.split('\n');
+  const output = [];
+  const realToOriginalLineMap = new Map();
+
+  const injectNOP = (lineNum) => {
+    const d0 =  lineNum        & 0xFF;
+    const d1 = (lineNum >> 8)  & 0xFF;
+    const d2 = (lineNum >> 16) & 0xFF;
+    const d3 = (lineNum >> 24) & 0xFF;
+    const marker = `__asm__(".byte 0x0F,0x1F,0x80,${d0},${d1},${d2},${d3}");`;
+    output.push(marker);
+    realToOriginalLineMap.set(output.length - 1, lineNum);
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    const originalLineNum = i + 1;
+
+    // Skip empty lines and pure braces
+    if (!trimmed || trimmed === '{' || trimmed === '}') {
+      output.push(line);
+      continue;
+    }
+
+    // Inject one NOP marker before any non-empty, non-asm line
+    if (!trimmed.startsWith('__asm__')) {
+      injectNOP(originalLineNum);
+    }
+
+    output.push(line);
+  }
+
+  window.realToOriginalLineMap = realToOriginalLineMap;
+  return output.join('\n');
+}
+
+
+
+
+
 
 
 /* ──────────────────────────────────────────────────────────
@@ -132,105 +368,198 @@ function injectMarkers(src) {
  let curAsmRow  = null;
 let curSrcLine = null;
 
-function highlightAsm(rip) {
+function highlightAsm(ripOrArray) {
+  // Remove previous highlights
   if (curAsmRow !== null) {
-    asmEditor.removeLineClass(curAsmRow,  'background', 'step-highlight');
+    const toClear = Array.isArray(curAsmRow) ? curAsmRow : [curAsmRow];
+    toClear.filter(r => r != null).forEach(r =>
+      asmEditor.removeLineClass(r, 'background', 'step-highlight')
+    );
   }
-  curAsmRow = ripToAsmRow[rip];
-  if (curAsmRow != null) {
-    asmEditor.addLineClass   (curAsmRow,  'background', 'step-highlight');
-    asmEditor.scrollIntoView({ line: curAsmRow, ch: 0 });
+
+  // Compute new highlights
+  if (Array.isArray(ripOrArray)) {
+    curAsmRow = ripOrArray.map(rip => ripToAsmRow[rip]).filter(r => r != null);
+    curAsmRow.forEach(r =>
+      asmEditor.addLineClass(r, 'background', 'step-highlight')
+    );
+    if (curAsmRow.length)
+      asmEditor.scrollIntoView({ line: curAsmRow[0], ch: 0 });
+  } else {
+    curAsmRow = ripToAsmRow[ripOrArray];
+    if (curAsmRow != null) {
+      asmEditor.addLineClass(curAsmRow, 'background', 'step-highlight');
+      asmEditor.scrollIntoView({ line: curAsmRow, ch: 0 });
+    }
   }
 }
 
+
+
 function highlightSrc(line) {
-  /* remove previous highlight only if we really have one */
   if (typeof curSrcLine === 'number') {
     editor.removeLineClass(curSrcLine, 'background', 'line-highlight');
   }
-
-  /* add new highlight only for a _number_ we recognise */
   if (typeof line === 'number') {
-    curSrcLine = line - 1;                  // convert 1-based → 0-based
+    curSrcLine = line - 1;
     editor.addLineClass(curSrcLine, 'background', 'line-highlight');
     editor.scrollIntoView({ line: curSrcLine, ch: 0 });
   } else {
-    curSrcLine = undefined;                 // nothing to highlight
+    curSrcLine = null;
   }
 }
 
 
-/* ────────────────── compile & disassemble ─────────────────── */
-async function compileAndDisasm(){
-  asmEditor.setValue('');ripToAsmRow={};instructions=[];currentSourceLine=null;
-  tccModule=await window._createTCC({locateFile:p=>p.endsWith('.wasm')||p.endsWith('.data')
-                                           ? '../libs/build-tcc/'+p : p});
-  const src=injectMarkers(editor.getValue());
-  tccModule.FS.writeFile('in.c',src);
+const WASM_DIR = '../libs/tinycc/tinycc/build-wasm/';
 
-  const lenPtr=tccModule._malloc(4);
-  const ptr=tccModule.cwrap('compile_and_get_text','number',['string','number'])('in.c',lenPtr);
-  const size=tccModule.HEAP32[lenPtr>>2];tccModule._free(lenPtr);
+/* ────────────────── compile & disassemble (patched) ────────────────── */
+async function compileAndDisasm () {
+  // Reset state
+  ripToAsmRow = {};
+  ripToSrcLine = {};
+  srcLineToRIPs = {};
+  instructions = [];
+  currentSourceLine = null;
 
-  codeBytes=new Uint8Array(tccModule.HEAPU8.buffer,ptr,size);
-  hexEditor.setValue(formatHex(codeBytes)+'\n✅ Compiled');
+  // 1. Instantiate TinyCC
+  tccModule = await window._createTCC({
+    locateFile: p => (p.endsWith('.wasm') || p.endsWith('.data'))
+      ? '../libs/tinycc/tinycc/build-wasm/' + p
+      : p
+  });
 
-  /* ---- symbol table ---- */
-  try{
-    const js=tccModule.cwrap('extract_symbols','string',['string'])('out.o');
-    symbolMap=JSON.parse(js,(k,v)=>/^\d+$/.test(v)?Number(v):v);
-    log('SYM',symbolMap);
-  }catch(e){console.warn('symbol extract failed',e)}
+  // 2. Compile C input
+  const src = injectMarkers(editor.getValue());
+  tccModule.FS.writeFile('in.c', src);
 
-  /* ─ disassemble ─ */
+  // 3. Compile to .text bytes
+  const lenPtr = tccModule._malloc(4);
+  const ptr = tccModule.ccall('compile_and_get_text', 'number',
+                               ['string', 'number'], ['in.c', lenPtr]);
+  const size = tccModule.HEAP32[lenPtr >> 2];
+  tccModule._free(lenPtr);
+
+  codeBytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
+  hexEditor.setValue(formatHex(codeBytes) + '\n✅ Compiled');
+
+  // 3b. Inject .rodata into memory at 0x5000
+  const rodataBase = 0x5000;
+  cpuState.mem = cpuState.mem || {};
+  for (let i = 0; i < 2048; i++) {
+    const val = tccModule.HEAPU8[rodataBase + i];
+    if (val === 0) break;
+    cpuState.mem[rodataBase + i] = val;
+  }
+
+  // 4. Extract symbols
+  try {
+    const js = tccModule.ccall('extract_symbols', 'string', ['string'], ['out.o']);
+    symbolMap = JSON.parse(js, (k, v) => (/^\d+$/).test(v) ? Number(v) : v);
+    log('SYM', symbolMap);
+    ripToLabel = {};
+    for (const [name, offset] of Object.entries(symbolMap)) {
+      ripToLabel[offset + textBase] = name;
+    }
+  } catch (e) {
+    console.warn('symbol extract failed', e);
+  }
+
+  // 5. Disassemble via Capstone
   disasmFunc(codeBytes, codeBytes.length, textBase);
+  console.log('RIP-to-source mapping:', ripToSrcLine);
+
   setTimeout(() => {
     buildInstList();
-    buildVarMap();      // ← new
-  }, 5);
-
+    buildVarMapForCurrentFrame();
+    console.log('Full Disassembly:\n' + asmEditor.getValue());
+  }, 0);
 }
 
 
-function buildVarMap(){
-  // returns an { offset → varName } map for the function containing cpuState.rip
-  const funcs = Object.entries(symbolMap)
-    .map(([name, off]) => ({ name, addr: off + textBase }))
-    .sort((a,b) => a.addr - b.addr);
 
-  // find which function range we’re in
-  let cur;
-  for (let i = 0; i < funcs.length; i++) {
-    const f = funcs[i];
-    const nextAddr = (i+1 < funcs.length ? funcs[i+1].addr : Infinity);
-    if (cpuState.rip >= f.addr && cpuState.rip < nextAddr) {
-      cur = f;
-      break;
-    }
-  }
-  if (!cur) return {};
 
-  const startAddr = cur.addr;
-  const endAddr   = funcs.find(f=>f.name===cur.name)+1 < funcs.length
-                  ? funcs[funcs.indexOf(cur)+1].addr
-                  : Infinity;
 
+function buildVarMapForCurrentFrame() {
   const map = {};
+  const candidates = [];
+
+  const declRegex = /\b(?:unsigned\s+)?(?:int|char|long|float|double|volatile)?\s+([^;{]+)/;
+
+  // Find current function bounds based on RIP
+  const rip = cpuState.rip;
+  const fnStart = Object.values(symbolMap)
+    .filter(v => typeof v === 'number' && v <= (rip - textBase))
+    .sort((a, b) => b - a)[0];
+  const fnEnd = Object.values(symbolMap)
+    .filter(v => typeof v === 'number' && v > fnStart)
+    .sort((a, b) => a - b)[0] || 0xffff;
+
+  // Scan all instructions mapped to source lines in current function
   for (const [ripStr, srcLine] of Object.entries(ripToSrcLine)) {
-    const rip = +ripStr;
-    if (rip < startAddr || rip >= endAddr) continue;
-    const asmRow  = ripToAsmRow[rip];
-    const asmLine = asmEditor.getLine(asmRow) || "";
-    const m = asmLine.match(
-      /mov\s+dword ptr\s*\[\s*rbp\s*-\s*(0x[0-9a-f]+|\d+)\]\s*,\s*eax/i
-    );
-    if (!m) continue;
-    const off = parseInt(m[1], m[1].startsWith('0x')?16:10);
-    const decl = editor.getLine(srcLine-1).trim();
-    const nm = decl.match(
-      /\b(?:unsigned\s+)?(?:int|char|long|float|double|volatile)\s+([A-Za-z_]\w*)/
-    );
-    if (nm) map[off] = nm[1];
+    const addr = parseInt(ripStr);
+    if (addr < fnStart + textBase || addr >= fnEnd + textBase) continue;
+
+    const asmRow = ripToAsmRow[addr];
+    const asmLine = asmEditor.getLine(asmRow);
+    if (!asmLine) continue;
+
+    const match = asmLine.match(/\[rbp\s*-\s*(0x[0-9a-f]+|\d+)\]/i);
+    if (!match) continue;
+
+    const offset = parseInt(match[1], match[1].startsWith("0x") ? 16 : 10);
+    candidates.push({ offset, srcLine });
+  }
+
+  // Deduplicate offsets (1 name per [rbp-X])
+  const seenOffsets = new Set();
+  const filtered = candidates.filter(({ offset }) => {
+    if (seenOffsets.has(offset)) return false;
+    seenOffsets.add(offset);
+    return true;
+  }).sort((a, b) => a.srcLine - b.srcLine);
+
+  // Try to match each offset to variable declarations
+  for (const { offset, srcLine } of filtered) {
+    let names = [];
+
+    const tryExtract = (line) => {
+      const match = line.match(declRegex);
+      if (!match) return [];
+      return match[1]
+        .split(',')
+        .map(x => x.split('=')[0].trim())
+        .filter(name => /^[A-Za-z_]\w*$/.test(name));
+    };
+
+    // 1️⃣ Try current source line first
+    const currentLine = editor.getLine(srcLine - 1)?.trim();
+    if (currentLine) {
+      names = tryExtract(currentLine);
+    }
+
+    // 2️⃣ Then look upwards if no match
+    if (names.length === 0) {
+      for (let i = srcLine - 2; i >= 0; i--) {
+        const line = editor.getLine(i)?.trim();
+        if (!line) continue;
+        names = tryExtract(line);
+        if (names.length > 0) break;
+      }
+    }
+
+    // 3️⃣ Assign first unused name
+    for (const name of names) {
+      if (!Object.values(map).includes(name)) {
+        map[offset] = name;
+        console.log(`🟢 Assigned name '${name}' to [rbp-${offset}] at C line ${srcLine}`);
+        break;
+      }
+    }
+
+    // 4️⃣ Warn if no match
+    if (!map[offset]) {
+      console.warn(`🟨 Could not assign name to [rbp-${offset}] at C line ${srcLine}`);
+    }
   }
 
   return map;
@@ -238,46 +567,72 @@ function buildVarMap(){
 
 
 
-// put this just once, outside appendAsm
-let currentSrcLine = null;
 
-/* appendAsm callback (patched) */
+
+
+
+
+
+
+let currentSrcLine = null; // ← this tracks the last known C line
+
 function appendAsm(line) {
   line = line.trim();
   if (!line) return;
 
-  // split out existing lines to avoid duplicates
   const out = asmEditor.getValue().split('\n');
   if (out.includes(line)) return;
 
-  // extract the instruction address (RIP)
+  // Extract RIP
   const addrM = line.match(/^0x([0-9a-fA-F]+):/);
   if (!addrM) return;
   const rip = parseInt(addrM[1], 16);
-  ripToAsmRow[rip] = out.length;
+  const asmRow = out.length;
 
-  // look for our injected NOP-marker: `nop dword ptr [rax + N]`
-  // where N might be decimal ("10") or hex ("0xa")
+  // Optional label (e.g., main:)
+  if (ripToLabel && ripToLabel[rip]) {
+    const label = `${ripToLabel[rip]}:`;
+    out.push(label);
+  }
+
+  // Append line to disassembly
+  out.push(line);
+  ripToAsmRow[rip] = out.length - 1;
+
+  let finalLine = undefined;
+
+  // Detect NOP marker
   const markM = line.match(
     /nop\s+dword ptr\s*\[\s*rax\s*\+\s*(0x[0-9a-fA-F]+|\d+)\s*\]/i
   );
   if (markM) {
     const tok = markM[1];
-    // parse hex or decimal
-    currentSrcLine = tok.startsWith('0x')
-      ? parseInt(tok, 16)
-      : parseInt(tok, 10);
-  }
+    const lineNum = tok.startsWith('0x') ? parseInt(tok, 16) : parseInt(tok, 10);
+    const mapped = window.realToOriginalLineMap?.get(asmRow);
+    finalLine = (typeof mapped === 'number') ? mapped : lineNum;
 
-  // associate this RIP → source‐line (if we have one)
-  if (currentSrcLine != null) {
+    currentSrcLine = finalLine;
     ripToSrcLine[rip] = currentSrcLine;
+
+    if (!srcLineToRIPs[currentSrcLine])
+      srcLineToRIPs[currentSrcLine] = [];
+    srcLineToRIPs[currentSrcLine].push(rip);
+  }
+  else if (currentSrcLine !== null) {
+    ripToSrcLine[rip] = currentSrcLine;
+
+    if (!srcLineToRIPs[currentSrcLine])
+      srcLineToRIPs[currentSrcLine] = [];
+    srcLineToRIPs[currentSrcLine].push(rip);
   }
 
-  // append and re-write the disassembly panel
-  out.push(line);
+  // ✅ Log mapping
+  console.log('appendAsm called for:', line);
+  console.log('→ asmRow =', asmRow, '→ rip =', rip, '→ C line =', ripToSrcLine[rip]);
+
   asmEditor.setValue(out.join('\n'));
 }
+
 
 
 /* build linear instruction list */
@@ -287,26 +642,30 @@ function buildInstList(){
 }
 
 /* ─────────────────── debugger init ────────────────────────── */
-function debugInit(){
-  if (!codeBytes) return alert('Compile first!');
+function debugInit () {
+  cpuState.prevMem = {};
+
+  if (!codeBytes)      return alert('Compile first!');
   const start = (symbolMap.main ?? 0) + textBase;
 
   cpuState = {
-    rip:  start,
-    rsp:  0x8000,
-    rbp:  0x8000,
-    eax:  0, ecx: 0,
-    rdi:  0,
-    ZF:   false, SF: false, OF: false,
-    mem:  {}, stack: []
+    /* 64-bit view */
+    rip:start, rsp:0x8000, rbp:0x8000,
+    rdi:0,     eax:0, ecx:0,
+
+    /* 32-bit mirrors (handy for -m32 builds) */
+    eip:start&0xFFFFFFFF, esp:0x8000, ebp:0x8000,
+
+    ZF:0, SF:0, OF:0,
+    mem:{}, stack:[]
   };
 
-  // build & push the locals‐map for main
+  /* rebuild var-name map for main() and push frame */
   varNameStack = [];
   varNameStack.push(buildVarMapForCurrentFrame());
 
   updateUI();
-  log(`DBG start at 0x${start.toString(16)}`);
+  console.log(`DBG start at 0x${start.toString(16)}`);
 }
 
 
@@ -345,52 +704,21 @@ const lookup = name => typeof window[name] === 'function'
 
 /* ── pretty console dump for the current RIP ──────────────── */
 function dbgLine(rip){
-  const srcLine  = ripToSrcLine[rip];          // 1-based or undefined
-  const asmRow   = ripToAsmRow [rip];          // 0-based CodeMirror row
+  const srcLine  = ripToSrcLine[rip];
+  const asmRow   = ripToAsmRow[rip];
   const srcTxt   = (typeof srcLine === 'number')
-                   ? editor.getLine(srcLine-1).trim()
-                   : '(no src)';
-  const asmTxt   = (asmRow != null)
-                   ? asmEditor.getLine(asmRow).split(':')[1].trim()
-                   : '(no asm)';
+                   ? editor.getLine(srcLine - 1).trim()
+                   : '(no C line)';
+  const asmTxt   = (asmRow !== undefined)
+                   ? asmEditor.getLine(asmRow).trim()
+                   : '(no ASM line)';
 
-  console.log(
-`SRC  L${srcLine ?? '-'}\t: ${srcTxt}
-ASM  L${asmRow ?? '-'}\t: ${asmTxt}
-────────────────────────────────────────────`);
+  console.log(`🧠 C Line ${srcLine ?? '??'}: ${srcTxt}`);
+  console.log(`⚙️ ASM Line ${asmRow ?? '??'}: ${asmTxt}`);
+  console.log('────────────────────────────────────────────');
 }
 
-// at the top of your script, alongside varNameMap:
-//let varNameStack = [];
 
-// replace your buildVarMap() with this:
-function buildVarMapForCurrentFrame() {
-  // // clear out and rebuild just for the current frame
-  // const frameMap = {};
-  // // the *current* RBP:
-  // const base = cpuState.rbp;
-  // for (const [ripStr, srcLine] of Object.entries(ripToSrcLine)) {
-  //   const rip = +ripStr;
-  //   const asmRow = ripToAsmRow[rip];
-  //   const asmLine = asmEditor.getLine(asmRow) || "";
-  //   // look for a “mov dword ptr [rbp - N], eax” → a store into a local
-  //   const m = asmLine.match(
-  //     /mov\s+dword ptr\s*\[\s*rbp\s*-\s*(0x[0-9a-f]+|\d+)\]\s*,\s*eax/i
-  //   );
-  //   if (!m) continue;
-  //   const offset = parseInt(m[1], m[1].startsWith("0x") ? 16 : 10);
-  //   // pull the C declaration at that line
-  //   const decl = editor.getLine(srcLine - 1).trim();
-  //   const nm = decl.match(
-  //     /\b(?:unsigned\s+)?(?:int|char|long|float|double|volatile)\s+([A-Za-z_]\w*)/
-  //   );
-  //   if (nm) {
-  //     frameMap[offset] = nm[1];
-  //   }
-  // }
-  // return frameMap;
-  return buildVarMap();
-}
 
 // in debugInit(), after you set cpuState:
 varNameStack = [];
@@ -398,152 +726,331 @@ const mainMap = buildVarMapForCurrentFrame();
 varNameStack.push(mainMap);
 
 
-function coreStep (skipPicThunk = true) {
-  /* ───────────── HALT guard ───────────── */
-  if (cpuState.rip === undefined) { console.log('🚫 HALT'); return; }
+function coreStep () {
+  varNameStack[varNameStack.length - 1] = buildVarMapForCurrentFrame();
 
-  /* ---- decode current instruction ---- */
+  if (cpuState.rip === undefined) {
+    console.log("🚫 HALT – no further instructions");
+    return;
+  }
+
   if (!cpuState.mem) cpuState.mem = {};
-  const rip     = cpuState.rip;
-  const row     = ripToAsmRow[rip];
-  const asmLn   = row != null ? asmEditor.getLine(row) : '';
-  const body    = (asmLn.split(':')[1] ?? asmLn).trim();
-  const low     = body.toLowerCase();
-  const op      = low.split(/\s+/)[0] || '';
-  const idx     = instructions.indexOf(rip);
-  const seqNext = instructions[idx + 1];           // linear fall-through
+  const rip   = cpuState.rip;
+  const aRow  = ripToAsmRow[rip];
+  const asmLn = aRow != null ? asmEditor.getLine(aRow) : '';
+  const body  = (asmLn.split(':')[1] || asmLn).trim();
+  const low   = body.toLowerCase();
+  const op    = (low.split(/\s+/)[0] || '');
+  const idx   = instructions.indexOf(rip);
+  const next  = instructions[idx + 1];
+  const seqNext = next;
 
-  console.log(`STEP 0x${rip.toString(16)}  ${body}`);
+  console.log(`STEP 0x${rip.toString(16).padStart(4,'0')}  ${body}`);
 
-  /* ---- handful of helpers ---- */
-  const w64 = (a,v)=>{cpuState.mem[a]=v&0xffffffff; cpuState.mem[a+4]=(v>>>32)&0xffffffff};
-  const r64 = a   =>(cpuState.mem[a]??0)|((cpuState.mem[a+4]??0)<<32);
   const dispRbp = () => {
-    const m = low.match(/\[rbp\s*-\s*(0x[0-9a-f]+|\d+)/);
-    return m ? cpuState.rbp - parseInt(m[1], m[1].startsWith('0x')?16:10) : null;
+    const m = low.match(/\[rbp\s*-\s*(0x[0-9a-f]+|\d+)\]/i);
+    return m ? cpuState.rbp - parseInt(m[1], m[1].startsWith("0x") ? 16 : 10) : null;
   };
+  const w64 = (a,v) => {
+    cpuState.mem[a]   =  v & 0xFFFFFFFF;
+    cpuState.mem[a+4] = (v >>> 32) & 0xFFFFFFFF;
+  };
+  const r64 = a =>
+    (cpuState.mem[a] ?? 0) | ((cpuState.mem[a + 4] ?? 0) << 32);
 
-  /* ---- MOV / ADD (locals & immediates) ---- */
-  if (op==='mov' && low.includes('[rbp -') && /,\s*eax\s*$/.test(low)) {
-    const a=dispRbp(); if(a!=null) cpuState.mem[a]=cpuState.eax;
-  } else if (/^\s*mov\s+eax\s*,/.test(low) && low.includes('[rbp -')) {
-    const a=dispRbp(); if(a!=null) cpuState.eax=cpuState.mem[a]??0;
-  } else if (/^\s*mov\s+ecx\s*,/.test(low) && low.includes('[rbp -')) {
-    const a=dispRbp(); if(a!=null) cpuState.ecx=cpuState.mem[a]??0;
-  } else if (/^\s*mov\s+eax\s*,/.test(low) && !low.includes('[rbp -')) {
-    const m=low.match(/mov\s+eax\s*,\s*(0x[0-9a-f]+|\d+)/);
-    if(m) cpuState.eax=parseInt(m[1],m[1].startsWith('0x')?16:10);
-  } else if (/^\s*add\s+eax\s*,\s*ecx/.test(low)) {
-    cpuState.eax=(cpuState.eax+cpuState.ecx)>>>0;
-  } else if (/^\s*add\s+eax\s*,/.test(low)) {
-    const m=low.match(/add\s+eax\s*,\s*(0x[0-9a-f]+|\d+)/);
-    if(m) cpuState.eax=(cpuState.eax+parseInt(m[1],m[1].startsWith('0x')?16:10))>>>0;
-  }
-
-  /* ---- very-tiny RDI helpers ---- */
-  if (/mov\s+eax\s*,\s*(r|e)di/.test(low)) cpuState.eax=(cpuState.rdi||cpuState.edi)>>>0;
-  if (/mov\s+(r|e)di\s*,\s*eax/.test(low)) cpuState.rdi=cpuState.eax>>>0;
-
-  /* ---- prologue / epilogue ---- */
-  if (op==='push'&&low.includes('rbp')) { cpuState.rsp-=8; w64(cpuState.rsp,cpuState.rbp);}
-  else if (op==='mov'&&low.includes('rbp, rsp'))            cpuState.rbp=cpuState.rsp;
-  else if (op==='sub'&&low.includes('rsp,')) {
-    const m=low.match(/sub\s+rsp\s*,\s*(0x[0-9a-f]+)/); if(m) cpuState.rsp-=parseInt(m[1],16);
-  } else if (op==='leave') {
-    cpuState.rsp=cpuState.rbp; cpuState.rbp=r64(cpuState.rsp); cpuState.rsp+=8;
-  }
-
-  /* ---- CALL ---- */
-  if (op==='call') {
-    let target=null;
-
-    /* immediate call */
-    const imm=low.match(/call\s+0x([0-9a-f]+)/);
-    if (imm) target=parseInt(imm[1],16);
-
-    /* register-indirect (call rax, etc.) */
-    if (!target){
-      const rM=low.match(/call\s+(r|e)([abcd]x|[sd]i|[sb]p|[sc]x|r1[0-5])/);
-      if(rM){ const reg=(rM[1]==='r'?'r':'e')+rM[2]; target=cpuState[reg]>>>0; }
+  // Register / Memory Ops
+  if (op === "mov") {
+    if (low.includes("[rbp -") && /,\s*eax\s*$/.test(low)) {
+      const a = dispRbp(); if (a != null) cpuState.mem[a] = cpuState.eax >>> 0;
+    } else if (/^\s*mov\s+e[ac]x\s*,/.test(low) && low.includes("[rbp -")) {
+      const dst = low.includes("eax") ? "eax" : "ecx";
+      const a = dispRbp();
+      if (a != null) cpuState[dst] = cpuState.mem[a] || 0;
+    } else if (/^\s*mov\s+eax\s*,/.test(low)) {
+      const m = low.match(/mov\s+eax\s*,\s*(0x[0-9a-f]+|\d+)/);
+      if (m) cpuState.eax = parseInt(m[1], m[1].startsWith("0x") ? 16 : 10) >>> 0;
+    } else if (/mov\s+eax\s*,\s*(r|e)di/.test(low)) {
+      cpuState.eax = (cpuState.rdi ?? cpuState.edi) >>> 0;
+    } else if (/mov\s+(r|e)di\s*,\s*eax/.test(low)) {
+      cpuState.rdi = cpuState.eax >>> 0;
+    } else if (/mov\s+rdi\s*,\s*rax/.test(low)) {
+      cpuState.rdi = cpuState.eax >>> 0;
+    } else if (/mov\s+(r|e)di\s*,\s*(0x[0-9a-f]+|\d+)/.test(low)) {
+      const m = low.match(/mov\s+(?:r|e)di\s*,\s*(0x[0-9a-f]+|\d+)/);
+      cpuState.rdi = parseInt(m[1], m[1].startsWith("0x") ? 16 : 10) >>> 0;
+    } else if (/mov\s+rsi\s*,\s*rax/.test(low)) {
+      cpuState.rsi = cpuState.eax >>> 0;
+    } else if (/mov\s+rsi\s*,\s*(0x[0-9a-f]+|\d+)/.test(low)) {
+      const m = low.match(/mov\s+rsi\s*,\s*(0x[0-9a-f]+|\d+)/);
+      cpuState.rsi = parseInt(m[1], m[1].startsWith("0x") ? 16 : 10) >>> 0;
     }
+  }
 
-    if (target!==null) {
-      /* optional PIC-thunk skip */
-      if (skipPicThunk && target === seqNext) {
-        cpuState.rip = seqNext; refreshUI(); return;
+  // Math ops
+  if (op === "add" && /eax,\s*ecx/.test(low)) {
+    cpuState.eax = (cpuState.eax + cpuState.ecx) >>> 0;
+  } else if (op === "add") {
+    const m = low.match(/add\s+eax\s*,\s*(0x[0-9a-f]+|\d+)/);
+    if (m) cpuState.eax = (cpuState.eax + parseInt(m[1], m[1].startsWith("0x") ? 16 : 10)) >>> 0;
+  }
+
+  // Comparisons
+  if (op === "cmp") {
+    let lhs = 0, rhs = 0;
+    if (low.includes("cmp eax")) {
+      lhs = cpuState.eax >>> 0;
+      const m = low.match(/cmp\s+eax\s*,\s*(0x[0-9a-f]+|\d+|ecx)/);
+      rhs = m[1] === "ecx"
+        ? cpuState.ecx >>> 0
+        : parseInt(m[1], m[1].startsWith("0x") ? 16 : 10) >>> 0;
+    } else if (low.includes("cmp edi")) {
+      lhs = cpuState.rdi >>> 0;
+      const m = low.match(/cmp\s+edi\s*,\s*(0x[0-9a-f]+|\d+)/);
+      rhs = parseInt(m[1], m[1].startsWith("0x") ? 16 : 10) >>> 0;
+    }
+    const res = (lhs - rhs) >>> 0;
+    cpuState.ZF = +(res === 0);
+    cpuState.SF = +((res >>> 31) & 1);
+    const sL = (lhs >>> 31) & 1, sR = (rhs >>> 31) & 1, sO = (res >>> 31) & 1;
+    cpuState.OF = +(sL !== sR && sO !== sL);
+  }
+
+  if (op === "test" && low.includes("eax, eax")) {
+    cpuState.ZF = +(cpuState.eax === 0);
+    cpuState.SF = +((cpuState.eax >>> 31) & 1);
+    cpuState.OF = 0;
+  }
+
+  // Prologue / epilogue
+  if (op === "push" && low.includes("rbp")) {
+    cpuState.rsp -= 8;
+    w64(cpuState.rsp, cpuState.rbp);
+  } else if (op === "mov" && low.includes("rbp, rsp")) {
+    cpuState.rbp = cpuState.rsp;
+  } else if (op === "sub" && low.includes("rsp,")) {
+    const m = low.match(/sub\s+rsp\s*,\s*(0x[0-9a-f]+)/);
+    if (m) cpuState.rsp -= parseInt(m[1], 16);
+  } else if (op === "leave") {
+    cpuState.rsp = cpuState.rbp;
+    cpuState.rbp = r64(cpuState.rsp);
+    cpuState.rsp += 8;
+  }
+
+  // CALL / RET
+  // CALL / RET
+  if (op === "call") {
+    const m = low.match(/call\s+0x([0-9a-f]+)/);
+    if (m) {
+      const tgt = parseInt(m[1], 16);
+      const retAddr = seqNext;
+
+      // ✅ Try printf detection
+      const fmtPtr = cpuState.rdi ?? 0;
+      const argVal = cpuState.rsi ?? 0;
+      const fmtStr = memoryReadString(fmtPtr);
+
+      if (fmtStr && fmtStr.includes("%d")) {
+        const rendered = fmtStr.replace(/%d/, argVal);
+        console.log(`🖨️ printf: ${rendered}`);
+
+        // ✅ Append to CPU log
+        cpuState.printfLog = cpuState.printfLog || [];
+        cpuState.printfLog.push(rendered);
+
+        // Simulate return from printf
+        cpuState.rip = retAddr;
+        refreshUI();
+        return;
       }
 
-      /* real function call */
+      // Normal call fallback
+      cpuState.rsp -= 8;
+      w64(cpuState.rsp, retAddr);
+      (cpuState.stack ||= []).push(cpuState.rsp);
       varNameStack.push(buildVarMapForCurrentFrame());
-      cpuState.rsp-=8; w64(cpuState.rsp,seqNext); (cpuState.stack??=[]).push(cpuState.rsp);
-      cpuState.rip=target; refreshUI();
-      console.log(`📞 CALL 0x${target.toString(16)} (ret→0x${seqNext?.toString(16)})`);
+      cpuState.rip = tgt;
+      refreshUI();
       return;
     }
   }
 
-  /* ---- RET ---- */
-  if (op==='ret'){
-    varNameStack.pop();                                       // drop callee frame
-    if (varNameStack.length)                                  // rebuild caller map
-      varNameStack[varNameStack.length-1]=buildVarMapForCurrentFrame();
 
-    if (!cpuState.stack?.length) cpuState.rip=undefined;
-    else {
-      const sp=cpuState.stack.pop(), ret=r64(sp);
-      delete cpuState.mem[sp]; delete cpuState.mem[sp+4];
-      cpuState.rsp+=8; cpuState.rip = ripToAsmRow[ret]?ret:undefined;
+
+
+
+  if (op === "ret") {
+    if (varNameStack.length > 1) varNameStack.pop();
+    const updated = buildVarMapForCurrentFrame();
+    if (varNameStack.length > 0) varNameStack[varNameStack.length - 1] = updated;
+
+    const sp = cpuState.stack?.pop?.();
+    if (sp === undefined) {
+      cpuState.rip = undefined;
+    } else {
+      const ret = r64(sp);
+      delete cpuState.mem[sp];
+      delete cpuState.mem[sp + 4];
+      cpuState.rsp += 8;
+      cpuState.rip = ret;
     }
-    refreshUI(); return;
+    refreshUI();
+    return;
   }
 
-  /* ---- conditional & unconditional jumps ---- */
-  if(op==='jmp'){
-    const jm=low.match(/jmp\s+0x([0-9a-f]+)/);
-    if(jm) cpuState.rip=parseInt(jm[1],16);
-  } else if(op[0]==='j' && op!=='jmp'){
-    const tm=low.match(/0x([0-9a-f]+)/); if(tm){
-      const tgt=parseInt(tm[1],16);
-      const take=
-        (op==='je'||op==='jz' ) ? cpuState.ZF :
-        (op==='jne'||op==='jnz') ? !cpuState.ZF :
-        (op==='jg'            ) ? (!cpuState.ZF&&cpuState.SF===cpuState.OF):
-        (op==='jge'           ) ? (cpuState.SF===cpuState.OF):
-        (op==='jl'            ) ? (cpuState.SF!==cpuState.OF):
-        (op==='jle'           ) ? (cpuState.ZF||cpuState.SF!==cpuState.OF): false;
+  if (op.startsWith("j")) {
+    const m = low.match(/0x([0-9a-f]+)/);
+    if (m) {
+      const tgt = parseInt(m[1], 16);
+      const take =
+         (op === "je"  || op === "jz")   ? cpuState.ZF
+       : (op === "jne" || op === "jnz")  ? !cpuState.ZF
+       : (op === "jg")                   ? (!cpuState.ZF && cpuState.SF === cpuState.OF)
+       : (op === "jge")                  ? (cpuState.SF === cpuState.OF)
+       : (op === "jl")                   ? (cpuState.SF !== cpuState.OF)
+       : (op === "jle")                  ? (cpuState.ZF || cpuState.SF !== cpuState.OF)
+       : false;
       cpuState.rip = take ? tgt : seqNext;
-      console.log(`↪ ${op.toUpperCase()} ${take?'taken':'not'} → 0x${cpuState.rip.toString(16)}`);
-      refreshUI(); return;
+      refreshUI();
+      return;
     }
   }
 
-  /* ---- fall-through ---- */
   if (cpuState.rip === rip) cpuState.rip = seqNext;
-
-  refreshUI(); dbgLine(rip);
-
-  /* locals dump (optional) */
-  if (varNameStack.length){
-    const cur=varNameStack[varNameStack.length-1];
-    console.log(Object.entries(cur).map(([o,n])=>{
-      const v=cpuState.mem[cpuState.rbp-o];
-      return `${n}=[rbp-${o}] = ${v==null?'(undef)':v}`;
-    }).join(', '));
+  if (cpuState.rip === undefined) {
+    const result = cpuState.eax;
+    alert(`Program finished.\nReturn value: ${result} (0x${result.toString(16)})`);
   }
-  if (cpuState.rip!==rip){ console.log('NEXT →'); dbgLine(cpuState.rip); }
 
-  function refreshUI(){
-    updateRegs?.(); updateStack?.();
-    highlightAsm?.(cpuState.rip);
-    highlightSrc?.(ripToSrcLine[cpuState.rip]);
+  refreshUI();
+  dbgLine(rip);
+
+  if (varNameStack.length) {
+    const curMap = varNameStack.at(-1);
+    console.log(Object.entries(curMap).map(([off, name]) => {
+      const v = cpuState.mem[cpuState.rbp - off];
+      return `${name}=[rbp-${off}] = ${v ?? "(undef)"}`;
+    }).join(", "));
+  }
+
+  if (cpuState.rip !== rip) {
+    console.log("NEXT →");
+    dbgLine(cpuState.rip);
+  }
+
+  if (cpuState.rip === undefined) {
+    const result = cpuState.eax;
+    alert(`Program finished.\nReturn value: ${result} (0x${result.toString(16)})`);
   }
 }
 
+
+
+function refreshUI () {
+  updateRegs?.();
+  updateStack?.();
+  updateCPUDetails?.();
+
+  const srcLine = ripToSrcLine[cpuState.rip];
+  highlightAsm?.(srcLineToRIPs[srcLine] ?? cpuState.rip);
+  highlightSrc?.(srcLine);
+
+  // 🔧 Ensure memory is remembered for the next step
+  cpuState.prevMem = structuredClone(cpuState.mem);
+}
+
+
+
+
+
+
 /* Step **over** (default): skips one-instruction PIC thunks */
-function step ()     { coreStep(true);  }
+function step() {
+  const rip = cpuState.rip;
+  const asmRow = ripToAsmRow[rip];
+  const asmLine = asmEditor.getLine(asmRow) || '';
+
+  if (/^\s*ret\b/.test(asmLine)) {
+    cpuState.lastFrame = {
+      rbp: cpuState.rbp,
+      mem: structuredClone(cpuState.mem),
+      vars: varNameStack.at(-1) ? { ...varNameStack.at(-1) } : {}
+    };
+  }
+
+  coreStep(true);
+  cpuState.prevMem = structuredClone(cpuState.mem);
+}
+
 
 /* Step **into**: never skips, so we enter every callee      */
-function stepInto () { coreStep(false); }
+function stepInto() {
+  const rip = cpuState.rip;
+  const asmRow = ripToAsmRow[rip];
+  const asmLine = asmEditor.getLine(asmRow) || '';
+
+  if (/^\s*ret\b/.test(asmLine)) {
+    cpuState.lastFrame = {
+      rbp: cpuState.rbp,
+      mem: structuredClone(cpuState.mem),
+      vars: varNameStack.at(-1) ? { ...varNameStack.at(-1) } : {}
+    };
+  }
+
+  coreStep(false);
+  cpuState.prevMem = structuredClone(cpuState.mem);
+}
+
+
+function stepC() {
+  if (cpuState.rip === undefined) {
+    console.log("🚫 HALT – no further instructions");
+    return;
+  }
+
+  const currentRip = cpuState.rip;
+  const currentLine = ripToSrcLine[currentRip];
+
+  if (currentLine === undefined) {
+    const fallback = findClosestSrcLine(currentRip);
+    if (fallback !== undefined) {
+      highlightSrc(fallback);
+      console.warn(`↪️ Fallback: highlighting closest source line: ${fallback}`);
+    } else {
+      console.warn(`⚠️ Cannot step C line: no mapping for RIP 0x${currentRip.toString(16)}`);
+    }
+    stepInto();
+    cpuState.prevMem = structuredClone(cpuState.mem); // ✅ keep this
+    return;
+  }
+
+  // Collect all RIPs mapped to this source line
+  const groupRIPs = new Set(srcLineToRIPs[currentLine] || []);
+  let steps = 0;
+
+  // Step until we leave this source line group
+  while (cpuState.rip !== undefined) {
+    stepInto();
+    steps++;
+
+    if (!groupRIPs.has(cpuState.rip)) break;
+  }
+
+  cpuState.prevMem = structuredClone(cpuState.mem);  // ✅ also add this here
+
+  console.log(`✅ C step complete: line ${currentLine} → ${steps} instructions`);
+}
+
+
+function memoryReadString(addr) {
+  let str = '';
+  while (true) {
+    const byte = cpuState.mem[addr++] ?? 0;
+    if (byte === 0) break;
+    str += String.fromCharCode(byte);
+  }
+  return str;
+}
+
 
 
 
@@ -583,6 +1090,55 @@ function resetStepper(){
   cpuState={};document.getElementById('reg-box').innerHTML='<strong>Registers</strong>';
   document.getElementById('stack-box').innerHTML='<strong>Stack</strong>';
 }
+
+function updateCPUDetails () {
+  if (!cpuEditor) return;
+
+  const lines = [];
+
+  if (cpuState.rip !== undefined) {
+    lines.push("Locals:");
+    const map = varNameStack.at(-1) || {};
+    for (const [off, name] of Object.entries(map)) {
+      const addr = cpuState.rbp - off;
+      const val  = cpuState.mem[addr];
+      const hex  = val != null ? `0x${val.toString(16)}` : '??';
+      const prev = cpuState.prevMem?.[addr];
+      const changed = prev !== undefined && prev !== val;
+      const mark = changed ? '*' : ' ';
+      lines.push(`${mark} [rbp-${off}] ${name.padEnd(8)} = ${val ?? '??'} (${hex})`);
+    }
+  } else if (cpuState.lastFrame) {
+    const { rbp, mem, vars } = cpuState.lastFrame;
+    lines.push("📦 Final state of `main` locals:");
+    for (const [off, name] of Object.entries(vars)) {
+      const addr = rbp - off;
+      const val  = mem[addr];
+      const hex  = val != null ? `0x${val.toString(16)}` : '??';
+      lines.push(`[rbp-${off}] ${name.padEnd(8)} = ${val ?? '??'} (${hex})`);
+    }
+
+    lines.push('');
+    lines.push(`🟢 Return value: ${cpuState.eax} (0x${cpuState.eax.toString(16)})`);
+  }
+
+  if (cpuState.printfLog?.length) {
+    lines.push('');
+    lines.push('🖨️ printf output:');
+    cpuState.printfLog.forEach(line => lines.push('  ' + line));
+  }
+
+  cpuEditor.setValue(lines.join('\n'));
+
+  // Auto-scroll to bottom
+  cpuEditor.scrollTo(0, cpuEditor.getScrollInfo().height);
+}
+
+
+
+
+
+
 
 /* tiny hex helper ------------------------------------------- */
 function formatHex(buf){
