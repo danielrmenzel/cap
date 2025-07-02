@@ -1,445 +1,1108 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>WASM C Compiler & Disassembler + TinyEMU Debugger</title>
+<meta charset="UTF-8" />
+<title>WASM C Compiler & Disassembler + TinyEMU Debugger</title>
 
-  <!-- CodeMirror CSS -->
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css" />
-  <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/dracula.min.css" />
+<!-- CodeMirror --------------------------------------------------------->
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css"/>
+<link rel="stylesheet"
+      href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/dracula.min.css"/>
 
-  <style>
-    html, body {
-      height:100%; margin:0; padding:0;
-      background:#282a36; color:#f8f8f2; font-family:sans-serif;
-    }
-    body {
-      display:flex; flex-direction:column; padding:16px; gap:12px;
-    }
-    .editor-container {
-      height:200px; border:1px solid #44475a;
-      resize:vertical; overflow:hidden;
-    }
-    .CodeMirror {
-      width:100%; height:100%; font-family:monospace; font-size:14px;
-    }
-    .step-highlight {
-      background:rgba(80,250,123,0.2) !important;
-    }
-    .button-row {
-      display:flex; gap:8px; flex-wrap:wrap;
-    }
-    button {
-      background:#6272a4; color:#f8f8f2; border:none;
-      padding:6px 12px; cursor:pointer;
-    }
-    #cpu-visual {
-      display:flex; gap:16px; margin-top:12px;
-    }
-    #reg-box, #stack-box {
-      background:#44475a; padding:8px;
-      font-family:monospace; color:#f8f8f2;
-      overflow:auto; max-height:200px;
-    }
-    #reg-box { flex:0 0 200px; }
-    #stack-box { flex:1; border-left:1px solid #6272a4; padding-left:12px; }
-  </style>
+<style>
+ html,body{height:100%;margin:0;padding:0;background:#282a36;color:#f8f8f2;font-family:sans-serif}
+ body{display:flex;flex-direction:column;padding:16px;gap:12px}
+ .editor-container{height:200px;border:1px solid #44475a;resize:vertical;overflow:hidden}
+ .CodeMirror{width:100%;height:100%;font-family:monospace;font-size:14px}
+ .step-highlight{background:rgba(80,250,123,.2)!important}
+ .line-highlight{background:rgba(80,250,123,.2)!important}
+ .button-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+ button{background:#6272a4;color:#f8f8f2;border:none;padding:8px 16px;cursor:pointer;
+        border-radius:4px;font-size:13px;transition:background 0.2s}
+ button:hover{background:#7c8db5}
+ 
+ /* Example button styles */
+ .example-btn{background:#50fa7b;color:#282a36;font-weight:bold}
+ .example-btn:hover{background:#5af78e}
+ .advanced-btn{background:#ff79c6;color:#282a36;font-weight:bold}
+ .advanced-btn:hover{background:#ff8cc8}
+ 
+ /* Control button styles */
+ .control-btn{background:#ffb86c;color:#282a36;font-weight:bold}
+ .control-btn:hover{background:#ffc078}
+ #cpu-visual{display:flex;gap:16px;margin-top:12px}
+ #reg-box,#stack-box{background:#44475a;padding:12px;font-family:monospace;
+                     color:#f8f8f2;overflow:auto;max-height:400px}
+ #reg-box{flex:0 0 250px}
+ #stack-box{flex:1;border-left:1px solid #6272a4;padding-left:16px}
+ 
+ /* Collapsible sections */
+ .collapsible-section{border:1px solid #44475a;margin-bottom:24px}
+ .collapsible-header{background:#44475a;padding:8px 12px;cursor:pointer;user-select:none;
+                     display:flex;justify-content:space-between;align-items:center}
+ .collapsible-header:hover{background:#525563}
+ .collapsible-content{overflow:hidden;transition:max-height 0.3s ease}
+ .collapsible-content.collapsed{max-height:0!important}
+ .collapse-arrow{transition:transform 0.3s ease;font-size:12px}
+ .collapsed .collapse-arrow{transform:rotate(-90deg)}
+ 
+ /* Three-column layout */
+ .three-column-layout{display:flex;gap:16px;margin-bottom:16px}
+ .column{flex:1;min-height:0}
+ .column h4{margin:0 0 8px 0;color:#50fa7b;font-size:14px;font-weight:bold}
+ .column .editor-container{min-height:200px}
+ .auto-resize{resize:none!important}
+</style>
 </head>
 <body>
-  <h2>1. Enter C Code</h2>
-  <div class="editor-container"><textarea id="editor"></textarea></div>
-
-  <div class="button-row">
-    <button onclick="compileAndDisasm()">Compile &amp; Disasm</button>
-    <button onclick="debugInit()">Start Debug</button>
-    <button onclick="step()">Step</button>
-    <button onclick="resetStepper()">Reset</button>
+<div class="collapsible-section">
+  <div class="collapsible-header" onclick="toggleCollapse(this)">
+    <span><strong>1. Code Development</strong></span>
+    <span class="collapse-arrow">▼</span>
   </div>
-
-  <h2>2. Hex Output</h2>
-  <div class="editor-container" style="height:100px;">
-    <textarea id="hex-editor"></textarea>
+  <div class="collapsible-content">
+    <div style="padding:12px">
+      <div class="three-column-layout">
+        <div class="column">
+          <h4>C Code Editor</h4>
+          <div class="editor-container" style="height:300px"><textarea id="editor"></textarea></div>
+        </div>
+        <div class="column">
+          <h4>Hex Output</h4>
+          <div class="editor-container" style="height:300px"><textarea id="hex-editor"></textarea></div>
+        </div>
+        <div class="column">
+          <h4>Assembly Disassembly</h4>
+          <div class="editor-container" style="height:300px"><textarea id="asm-editor"></textarea></div>
+        </div>
+      </div>
+      
+      <div class="button-row" style="margin-top:16px;margin-bottom:20px">
+        <button class="control-btn" onclick="compileAndDisasm()">Compile & Disasm</button>
+        <button class="control-btn" onclick="debugInit()">Start Debug</button>
+        <button class="control-btn" onclick="step()">Step</button>
+        <button class="control-btn" onclick="resetStepper()">Reset</button>
+        
+        <strong style="color:#50fa7b; margin-left: 20px;">Basic:</strong>
+        <button class="example-btn" onclick="loadExample('basic')">Variables</button>
+        <button class="example-btn" onclick="loadExample('loop')">Loop</button>
+        <button class="example-btn" onclick="loadExample('ifelse')">If-Else</button>
+        <button class="example-btn" onclick="loadExample('function')">Function</button>
+        <button class="example-btn" onclick="loadExample('math')">Math</button>
+        
+        <strong style="color:#ff79c6; margin-left: 20px;">Advanced:</strong>
+        <button class="advanced-btn" onclick="loadExample('bitwise')">Bitwise</button>
+        <button class="advanced-btn" onclick="loadExample('multiply')">Multiply</button>
+        <button class="advanced-btn" onclick="loadExample('division')">Division</button>
+        <button class="advanced-btn" onclick="loadExample('shifting')">Shifting</button>
+        <button class="advanced-btn" onclick="loadExample('complex')">Complex</button>
+      </div>
+    </div>
   </div>
+</div>
 
-  <h2>3. Disassembly</h2>
-  <div class="editor-container" style="height:150px;">
-    <textarea id="asm-editor"></textarea>
+<div class="collapsible-section">
+  <div class="collapsible-header" onclick="toggleCollapse(this)">
+    <span><strong>2. CPU State & Execution</strong></span>
+    <span class="collapse-arrow">▼</span>
   </div>
-
-  <h2>4. CPU State</h2>
-  <div class="editor-container" style="height:150px;">
-    <textarea id="cpu-editor"></textarea>
+  <div class="collapsible-content" style="max-height: none;">
+    <div style="padding:16px">
+      <div id="cpu-visual">
+        <div id="reg-box"><strong>Registers</strong></div>
+        <div id="stack-box"><strong>Stack</strong></div>
+      </div>
+    </div>
   </div>
+</div></body>
 
-  <div id="cpu-visual">
-    <div id="reg-box"><strong>Registers</strong></div>
-    <div id="stack-box"><strong>Stack</strong></div>
-  </div>
+<!-- Capstone module ----------------------------------------------------->
+<script type="module">
+import createCapstoneModule from '../libs/build-wrapper/capstone.js';
+window.createCapstoneModule = createCapstoneModule;
+</script>
 
-  <!-- 1) Capstone for disassembly -->
-  <script src="../libs/build-wrapper/capstone.js"></script>
+<!-- TinyCC (WASM) ------------------------------------------------------->
+<script type="module">
+import('../libs/build-tcc/tcc.mjs').then(m=>window._createTCC=m.default);
+</script>
 
-  <!-- 2) TinyCC via Emscripten -->
-  <script type="module">
-    import('../libs/build-tcc/tcc.mjs')
-      .then(m => window._createTCC = m.default);
-  </script>
+<!-- STAB Parser (WASM) ------------------------------------------------->
+<script type="module">
+import('../libs/build-tcc/stab_parser.mjs').then(m=>window._createSTAB=m.default);
+</script>
 
-  <!-- 3) CodeMirror -->
-  <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
-  <script
-    src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/clike/clike.min.js"></script>
+<!-- CodeMirror ---------------------------------------------------------->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/clike/clike.min.js"></script>
 
+<script>
+/* ───────────────────────── globals ───────────────────────── */
+const textBase = 0x2000;
+let editor,hexEditor,asmEditor,cpuEditor;
+let capstoneModule,disasmFunc,tccModule;
+let ripToAsmRow={},ripToSrcLine={},srcLineToRIPs={};
+let instructions=[],codeBytes=null,currentSourceLine=null;
+let cpuState={};            // filled in debugInit()
+let symbolMap={};
 
+/* ─────────────────── util logging helper ─────────────────── */
+const log=(tag,...m)=>console.log(tag,...m);
 
+/* ─────────────────── helpers for 64-bit mem ───────────────── */
+function write64(a,v){cpuState.mem[a]=v&0xffffffff;cpuState.mem[a+4]=(v>>>32)&0xffffffff}
+function read64(a){return (cpuState.mem[a]??0)|((cpuState.mem[a+4]??0)<<32)}
 
+/* mnemonic + misc helpers */
+function mnem(line){return (line.split(':')[1]||'').trim().split(/\s+/)[0]?.toLowerCase()||''}
+function rbpDisp(line){
+  const m=line.match(/\[rbp\s*-\s*(0x[0-9a-f]+|\d+)\]/i);
+  if(!m)return null;return cpuState.rbp-parseInt(m[1],m[1].startsWith('0x')?16:10);
+}
+function validRip(r){return r!==undefined&&ripToAsmRow.hasOwnProperty(r)}
 
-  <script>
-    // ————————————————— Locater for TCC assets —————————————————
-    async function createTCC() {
-      return window._createTCC({
-        locateFile: path => {
-          if (path.endsWith('.wasm') || path.endsWith('.data')) {
-            return '../libs/build-tcc/' + path;
-          }
-          return path;
-        }
-      });
+/* ─────────────────── CodeMirror setup ─────────────────────── */
+window.onload=async function setup() {
+  editor      = CodeMirror.fromTextArea(document.getElementById('editor'),{mode:'text/x-csrc',theme:'dracula',lineNumbers:true});
+  hexEditor   = CodeMirror.fromTextArea(document.getElementById('hex-editor'), {theme:'dracula',readOnly:true});
+  asmEditor   = CodeMirror.fromTextArea(document.getElementById('asm-editor'), {theme:'dracula',readOnly:true});
+
+  editor.setValue(`int main(){
+    int sum = 0;    
+    for(int i = 0; i < 2; i++){
+        sum += 1;
+        printf("Loop iteration: %d\\n", sum);
     }
+    int x = sum;
+}`);
 
-    // ————————————————— Globals —————————————————
-    let editor, hexEditor, asmEditor, cpuEditor;
-    let capstoneModule, disasmFunc, tccModule;
-    let instructions = [], instIndex = 0;
-    let ripToAsmRow = {}, ripToSrcLine = {};
-    let currentSourceLine = null;
-    let codeBytes = null;
-    const textBase = 0x1000;
-    let emuHandle = 0;
-    let cpuState = { rip: textBase, rsp: 0x8000, rbp: 0x8000, stack: [] };
+  // Initialize collapsible sections - set proper heights
+  document.querySelectorAll('.collapsible-content').forEach(content => {
+    content.style.maxHeight = content.scrollHeight + 'px';
+  });
 
-    window.onload = setupEditors;
+  capstoneModule=await createCapstoneModule({print:appendAsm,printErr:console.error});
+  disasmFunc    =capstoneModule.cwrap('disasm_x86',null,['array','number','number']);
+  log('✅ Capstone ready');
+};
+
+/* inject NOP markers so we can map → source line */
+function injectMarkers(src){
+  return src.split('\n').flatMap((ln,i)=>[
+    `__asm__(".byte 0x0F,0x1F,0x40,${Math.min(i+1,255)}");`,ln]).join('\n');
+}
 
 
+/* ──────────────────────────────────────────────────────────
+ *  very-minimal highlighters so step() never explodes
+ *  - adds/removes a CSS class on the relevant line
+ *  - if you don’t care about colouring, leave bodies empty
+ * ────────────────────────────────────────────────────────── */
+ let curAsmRow  = null;
+let curSrcLine = null;
 
-    function injectLineMarkers(sourceCode) {
-      const lines = sourceCode.split('\n');
-      const output = [];
-      let lineCounter = 1;
+function highlightAsm(rip) {
+  if (curAsmRow !== null) {
+    asmEditor.removeLineClass(curAsmRow,  'background', 'step-highlight');
+  }
+  curAsmRow = ripToAsmRow[rip];
+  if (curAsmRow != null) {
+    asmEditor.addLineClass   (curAsmRow,  'background', 'step-highlight');
+    asmEditor.scrollIntoView({ line: curAsmRow, ch: 0 });
+  }
+}
 
-      for (let i = 0; i < lines.length; i++) {
-        const trimmed = lines[i].trim();
+function highlightSrc(line) {
+  /* remove previous highlight only if we really have one */
+  if (typeof curSrcLine === 'number') {
+    editor.removeLineClass(curSrcLine, 'background', 'line-highlight');
+  }
 
-        const skip =
-          trimmed === '' ||
-          trimmed.startsWith('//') ||
-          trimmed.startsWith('/*') ||
-          trimmed.startsWith('*') ||
-          trimmed.startsWith('#') ||
-          trimmed.endsWith(':') ||
-          trimmed.startsWith('}') ||
-          trimmed === '{';
+  /* add new highlight only for a _number_ we recognise */
+  if (typeof line === 'number') {
+    curSrcLine = line - 1;                  // convert 1-based → 0-based
+    editor.addLineClass(curSrcLine, 'background', 'line-highlight');
+    editor.scrollIntoView({ line: curSrcLine, ch: 0 });
+  } else {
+    curSrcLine = undefined;                 // nothing to highlight
+  }
+}
 
-        if (!skip) {
-          // Encode line number in last byte (up to 255)
-          const encoded = Math.min(lineCounter, 255);
-          output.push(`  __asm__(".byte 0x0F, 0x1F, 0x40, ${encoded}");`);
-          lineCounter++;
-        }
 
-        output.push(lines[i]);
+/* ────────────────── compile & disassemble ─────────────────── */
+async function compileAndDisasm(){
+  asmEditor.setValue('');ripToAsmRow={};instructions=[];currentSourceLine=null;
+  tccModule=await window._createTCC({locateFile:p=>p.endsWith('.wasm')||p.endsWith('.data')
+                                           ? '../libs/build-tcc/'+p : p});
+  const src=editor.getValue();
+  tccModule.FS.writeFile('in.c',src);
+
+  const lenPtr=tccModule._malloc(4);
+  const ptr=tccModule.cwrap('compile_and_get_text','number',['string','number'])('in.c',lenPtr);
+  const size=tccModule.HEAP32[lenPtr>>2];tccModule._free(lenPtr);
+
+  codeBytes=new Uint8Array(tccModule.HEAPU8.buffer,ptr,size);
+  hexEditor.setValue(formatHex(codeBytes)+'\n✅ Compiled');
+
+  /* ---- symbol table ---- */
+  try{
+    const js=tccModule.cwrap('extract_symbols','string',['string'])('out.o');
+    symbolMap=JSON.parse(js,(k,v)=>/^\d+$/.test(v)?Number(v):v);
+    log('SYM',symbolMap);
+  }catch(e){console.warn('symbol extract failed',e)}
+
+  /* ---- line number mapping from STAB debug info ---- */
+  ripToSrcLine = {};
+  try{
+    // Create STAB parser module with proper initialization
+    const stabModule = await window._createSTAB({
+      print: (text) => console.log('[STAB]', text),
+      printErr: (text) => console.error('[STAB]', text)
+    });
+    
+    // Wait for module to be ready and check what's available
+    console.log('[STAB] Module loaded, checking available functions:', Object.keys(stabModule));
+    
+    if (!stabModule._malloc) {
+      throw new Error('STAB module not properly initialized - missing _malloc');
+    }
+    
+    // Read the ELF file data
+    const elfData = tccModule.FS.readFile('out.o');
+    console.log(`[STAB] ELF file size: ${elfData.length} bytes`);
+    
+    // Allocate memory in STAB module and copy ELF data
+    const elfPtr = stabModule._malloc(elfData.length);
+    stabModule.HEAPU8.set(elfData, elfPtr);
+    
+    // Parse STAB data
+    const parseFunc = stabModule.cwrap('parse_stab_from_buffer','string',['number','number']);
+    const lineJs = parseFunc(elfPtr, elfData.length);
+    
+    // Clean up memory
+    stabModule._free(elfPtr);
+    
+    // Parse result
+    if (lineJs && lineJs !== '{}') {
+      const lineMap = JSON.parse(lineJs);
+      Object.entries(lineMap).forEach(([addr,line])=>{
+        ripToSrcLine[parseInt(addr)] = line;
+      });
+      log('STAB_PARSED',ripToSrcLine);
+    } else {
+      console.warn('[STAB] No debug info found in ELF file');
+      ripToSrcLine = {};
+    }
+  }catch(e){
+    console.warn('STAB parsing failed, using fallback',e);
+    ripToSrcLine = {}; // Empty - will be filled in buildInstList if STAB fails
+  }
+
+  /* ─ disassemble ─ */
+  disasmFunc(codeBytes,codeBytes.length,textBase);
+  setTimeout(()=>{buildInstList();},5);          // let appendAsm finish
+}
+
+/* appendAsm = Capstone output callback */
+function appendAsm(line){
+  line=line.trim();if(!line)return;
+  const out=asmEditor.getValue().split('\n');
+  if(out.includes(line))return;
+
+  const m=line.match(/^0x([0-9a-f]+):/);if(m){
+    const rip=parseInt(m[1],16); 
+    
+    // Check if this address corresponds to a known function start
+    const funcEntry = Object.entries(symbolMap).find(([name, offset]) => {
+      return (textBase + offset) === rip;
+    });
+    
+    if (funcEntry) {
+      const [funcName] = funcEntry;
+      // Insert function label before the instruction
+      out.push('');  // Empty line for spacing
+      out.push(`; ──────── ${funcName}() ────────`);
+      ripToAsmRow[rip] = out.length;  // The actual instruction will be on the next line
+    } else {
+      ripToAsmRow[rip] = out.length;
+    }
+  }
+  out.push(line); asmEditor.setValue(out.join('\n'));
+}
+
+/* build linear instruction list */
+function buildInstList(){
+  instructions=Object.keys(ripToAsmRow).map(x=>parseInt(x)).sort((a,b)=>a-b);
+  log('INST',instructions.map(i=>'0x'+i.toString(16)));
+  
+  // Only provide fallback mapping if STAB parsing completely failed
+  if (Object.keys(ripToSrcLine).length === 0) {
+    console.warn('No STAB data available, using intelligent source estimation');
+    
+    // Create intelligent mapping based on source code structure
+    const sourceLines = editor.getValue().split('\n');
+    
+    // Find line numbers of key constructs
+    const lineMapping = {};
+    sourceLines.forEach((line, index) => {
+      const lineNum = index + 1;
+      const trimmed = line.trim();
+      
+      if (trimmed.includes('factorial')) {
+        lineMapping.factorial = lineMapping.factorial || lineNum;
+      } else if (trimmed.includes('main')) {
+        lineMapping.main = lineMapping.main || lineNum;
+      } else if (trimmed.includes('for')) {
+        lineMapping.for_loop = lineNum;
+      } else if (trimmed.includes('if')) {
+        lineMapping.if_stmt = lineNum;
+      } else if (trimmed.includes('return')) {
+        if (!lineMapping.return1) lineMapping.return1 = lineNum;
+        else if (!lineMapping.return2) lineMapping.return2 = lineNum;
       }
+    });
+    
+    // Map function addresses to detected line numbers
+    Object.entries(symbolMap).forEach(([funcName, offset]) => {
+      if (funcName && lineMapping[funcName]) {
+        const funcAddr = textBase + offset;
+        ripToSrcLine[funcAddr] = lineMapping[funcName];
+        
+        // For function bodies, spread instructions across nearby lines
+        const startLine = lineMapping[funcName];
+        instructions.forEach(addr => {
+          if (addr >= funcAddr && addr < funcAddr + 50) { // Rough function size
+            const instrOffset = Math.floor((addr - funcAddr) / 10);
+            ripToSrcLine[addr] = Math.min(startLine + instrOffset, sourceLines.length);
+          }
+        });
+      }
+    });
+    
+    console.log('[FALLBACK] Generated line mapping:', lineMapping);
+  }
+  
+  log('ENHANCED_MAP', ripToSrcLine);
+}
 
-      return output.join('\n');
+/* ─────────────────── debugger init ────────────────────────── */
+function debugInit(){
+  if(!codeBytes)return alert('Compile first!');
+  
+  // Start at main() - the actual program entry point
+  const start = (symbolMap.main ?? 0) + textBase;
+  
+  cpuState={
+    rip: start,
+    rsp: 0x1000,
+    rbp: 0x1000,
+    mem: {},
+    stack: [],
+    eax: 0,
+    ecx: 0,
+    edx: 0,
+    rdi: 0,  // First parameter register
+    rsi: 0,  // Second parameter register
+    ZF: false,
+    SF: false,
+    OF: false
+  };
+  
+  updateUI();
+  highlightAsm(cpuState.rip);
+  highlightSrc(ripToSrcLine[cpuState.rip]);
+  log(`DBG start at 0x${start.toString(16)} (main function)`);
+}
+
+// --------------------------------------------------------------------------
+//  SAFE-LOOKUP helper (keep this just once, above step or at the top)
+// --------------------------------------------------------------------------
+const lookup = name => typeof window[name] === 'function'
+                        ? window[name]
+                        : () => {};            // harmless no-op
+
+
+
+                        /* ------------------------------------------------------------------
+ *  helper: dump a 5-slot window around RSP (RSP ± 16 bytes)
+ * ------------------------------------------------------------------ */
+ function stackWindow () {
+  const win = [];
+  const top    = cpuState.rsp + 0x10;   // two slots above
+  const bottom = cpuState.rsp - 0x10;   // two slots below
+
+  for (let a = top; a >= bottom; a -= 4) {  // Check every 4 bytes for 32-bit values
+    const val = cpuState.mem[a] !== undefined ? cpuState.mem[a] : '??';
+
+    let mark = '';
+    if (a === cpuState.rsp && a === cpuState.rbp) mark = '←RSP,RBP';
+    else if (a === cpuState.rsp)                  mark = '←RSP';
+    else if (a === cpuState.rbp)                  mark = '←RBP';
+
+    win.push(`[0x${a.toString(16)}]=${val}${mark}`);
+  }
+  return win.join('\n');
+}
+
+
+
+/* ─────────────────────────────────────────────────────────────
+ *  step() – single-step pseudo-CPU interpreter
+ *  2025-05-08  •  no TinyEMU dependency, correct fall-through,
+ *                 full ZF/SF/OF handling for signed branches
+ * ------------------------------------------------------------------ */
+ function step () {
+  /* ── HALT guard ─────────────────────────────────────────── */
+  if (cpuState.rip === undefined) {
+    console.log('🚫 HALT – no further instructions'); return;
+  }
+
+  /* ── fetch current instruction --------------------------- */
+  if (!cpuState.mem) cpuState.mem = {};
+  const rip   = cpuState.rip;
+  const row   = ripToAsmRow[rip];
+  const asmLn = row != null ? asmEditor.getLine(row) : '';
+  const body  = (asmLn.split(':')[1] ?? asmLn).trim();
+  const low   = body.toLowerCase();
+  const op    = low.split(/\s+/)[0] || '';
+
+  const idx      = instructions.indexOf(rip);
+  const seqNext  = instructions[idx + 1];        // REAL fall-through
+
+  console.log(`STEP 0x${rip.toString(16)}  ${body} [eax=${cpuState.eax}]`);
+
+  /* ── helpers --------------------------------------------- */
+  const dispRbp = () => {
+    const m = low.match(/\[rbp\s*-\s*(0x[0-9a-f]+|\d+)\]/i);
+    return m ? cpuState.rbp -
+               parseInt(m[1], m[1].startsWith('0x') ? 16 : 10) : null;
+  };
+  const w64 = (a,v)=>{cpuState.mem[a]=v&0xffffffff;
+                      cpuState.mem[a+4]=(v>>>32)&0xffffffff;};
+  const r64 = a =>  (cpuState.mem[a]??0) |
+                   ((cpuState.mem[a+4]??0) << 32);
+
+  /* ── MOV / ADD we actually need -------------------------- */
+  if (op==='mov' && low.match(/mov\s+eax,\s*(0x[0-9a-f]+|\d+)/)) {
+      const m=low.match(/mov\s+eax,\s*(0x[0-9a-f]+|\d+)/);
+      if(m) {
+        cpuState.eax=parseInt(m[1], m[1].startsWith('0x') ? 16 : 10);
+        console.log(`📝 MOV eax=${cpuState.eax}`);
+      }
+  } else if (op==='mov' && low.includes('dword ptr [rbp') && low.includes(', eax')) {
+      const a=dispRbp(); 
+      if(a!==null) {
+        cpuState.mem[a]=cpuState.eax;
+        console.log(`📝 STORE [0x${a.toString(16)}] = ${cpuState.eax}`);
+      }
+  } else if (op==='mov' && low.includes('dword ptr [rbp') && low.includes(', ecx')) {
+      const a=dispRbp(); 
+      if(a!==null) {
+        cpuState.mem[a]=cpuState.ecx;
+        console.log(`📝 STORE [0x${a.toString(16)}] = ${cpuState.ecx}`);
+      }
+  } else if (op==='mov' && low.includes('eax, dword ptr [rbp')) {
+      const a=dispRbp(); 
+      if(a!==null) {
+        cpuState.eax=cpuState.mem[a]??0;
+        console.log(`📝 LOAD eax = [0x${a.toString(16)}] = ${cpuState.eax}`);
+      }
+  } else if (op==='lea' && low.includes('rax, [rip')) {
+      // LEA (Load Effective Address) - for string literals
+      // For now, just load the current instruction pointer as the address
+      cpuState.eax = cpuState.rip;
+      console.log(`📝 LEA rax = 0x${cpuState.eax.toString(16)} (string address)`);
+  } else if (op==='add' && low.includes('eax, 1')) {
+      cpuState.eax=(cpuState.eax+1)>>>0;
+      console.log(`📝 ADD eax = ${cpuState.eax}`);
+  } else if (op==='add' && low.includes('eax, ecx')) {
+      cpuState.eax=(cpuState.eax + cpuState.ecx)>>>0;
+      console.log(`📝 ADD eax = eax(${cpuState.eax - cpuState.ecx}) + ecx(${cpuState.ecx}) = ${cpuState.eax}`);
+  } else if (op==='add' && low.includes('eax, edx')) {
+      cpuState.eax=(cpuState.eax + cpuState.edx)>>>0;
+      console.log(`📝 ADD eax = eax(${cpuState.eax - cpuState.edx}) + edx(${cpuState.edx}) = ${cpuState.eax}`);
+  } else if (op==='add' && low.includes('ecx, eax')) {
+      cpuState.ecx=(cpuState.ecx + cpuState.eax)>>>0;
+      console.log(`📝 ADD ecx = ecx(${cpuState.ecx - cpuState.eax}) + eax(${cpuState.eax}) = ${cpuState.ecx}`);
+  } else if (op==='sub' && low.includes('eax, ecx')) {
+      cpuState.eax=(cpuState.eax - cpuState.ecx)>>>0;
+      console.log(`📝 SUB eax = ${cpuState.eax}`);
+  } else if (op==='sub' && low.includes('eax, edx')) {
+      cpuState.eax=(cpuState.eax - cpuState.edx)>>>0;
+      console.log(`📝 SUB eax = ${cpuState.eax}`);
+  } else if (op==='mov' && low.includes('ecx, eax')) {
+      cpuState.ecx = cpuState.eax;
+      console.log(`📝 MOV ecx = ${cpuState.ecx}`);
+  } else if (op==='mov' && (low.includes('ecx, dword ptr') || low.match(/mov\s+ecx,\s*\d+/))) {
+      const dwordMatch = low.match(/mov\s+ecx,\s*dword ptr \[rbp/);
+      const immMatch = low.match(/mov\s+ecx,\s*(\d+)/);
+      if (dwordMatch) {
+        const a = dispRbp();
+        if (a !== null) cpuState.ecx = cpuState.mem[a] ?? 0;
+      } else if (immMatch) {
+        cpuState.ecx = parseInt(immMatch[1], 10);
+      }
+      console.log(`📝 MOV ecx = ${cpuState.ecx}`);
+  } else if (op==='mov' && low.match(/mov\s+edx,\s*(0x[0-9a-f]+|\d+)/)) {
+      const m=low.match(/mov\s+edx,\s*(0x[0-9a-f]+|\d+)/);
+      if(m) {
+        cpuState.edx=parseInt(m[1], m[1].startsWith('0x') ? 16 : 10);
+        console.log(`📝 MOV edx=${cpuState.edx}`);
+      }
+  } else if (op==='mov' && low.includes('edx, eax')) {
+      cpuState.edx = cpuState.eax;
+      console.log(`📝 MOV edx = ${cpuState.edx}`);
+  } else if (op==='mov' && low.includes('eax, edx')) {
+      cpuState.eax = cpuState.edx;
+      console.log(`📝 MOV eax = ${cpuState.eax}`);
+  } else if (op==='mov' && low.includes('edx, dword ptr [rbp')) {
+      const a = dispRbp();
+      if (a !== null) {
+        cpuState.edx = cpuState.mem[a] ?? 0;
+        console.log(`📝 LOAD edx = [0x${a.toString(16)}] = ${cpuState.edx}`);
+      }
+  
+  /* ── 64-bit register moves for function calls ─────────────── */
+  } else if (op==='mov' && low.includes('rsi, rax')) {
+      cpuState.rsi = cpuState.eax;
+      console.log(`📝 MOV rsi = ${cpuState.rsi}`);
+  } else if (op==='mov' && low.includes('rdi, rax')) {
+      cpuState.rdi = cpuState.eax;
+      console.log(`📝 MOV rdi = ${cpuState.rdi}`);
+  } else if (op==='mov' && low.includes('qword ptr [rbp') && low.includes(', rdi')) {
+      const a = dispRbp();
+      if (a !== null) {
+        cpuState.mem[a] = cpuState.rdi;
+        console.log(`📝 STORE [0x${a.toString(16)}] = ${cpuState.rdi} (param a)`);
+      }
+  } else if (op==='mov' && low.includes('qword ptr [rbp') && low.includes(', rsi')) {
+      const a = dispRbp();
+      if (a !== null) {
+        cpuState.mem[a] = cpuState.rsi;
+        console.log(`📝 STORE [0x${a.toString(16)}] = ${cpuState.rsi} (param b)`);
+      }
+  } else if (op==='sub' && low.startsWith('sub\teax,')) {
+      const m=low.match(/sub\s+eax,\s*(0x[0-9a-f]+|\d+)/);
+      if(m) cpuState.eax=(cpuState.eax-
+        parseInt(m[1],m[1].startsWith('0x')?16:10))>>>0;
+  } else if (op==='imul' && low.includes('eax')) {
+      const m=low.match(/imul\s+eax,\s*(ecx|edx|\[rbp[^\]]*\])/);
+      if(m) {
+        let operand = 0;
+        if(m[1] === 'ecx') operand = cpuState.ecx;
+        else if(m[1] === 'edx') operand = cpuState.edx;
+        else if(m[1].includes('rbp')) {
+          const addr = dispRbp();
+          if(addr !== null) operand = cpuState.mem[addr] ?? 0;
+        }
+        cpuState.eax = (cpuState.eax * operand) >>> 0;
+      }
+  } else if (op==='inc' && low.includes('eax')) {
+      cpuState.eax = (cpuState.eax + 1) >>> 0;
+  } else if (op==='dec' && low.includes('eax')) {
+      cpuState.eax = (cpuState.eax - 1) >>> 0;
+  
+  /* ── Additional ALU operations ─────────────────────────── */
+  } else if (op==='mul' && low.includes('eax')) {
+      const m=low.match(/mul\s+(ecx|edx|\[rbp[^\]]*\])/);
+      if(m) {
+        let operand = 0;
+        if(m[1] === 'ecx') operand = cpuState.ecx;
+        else if(m[1] === 'edx') operand = cpuState.edx;
+        else if(m[1].includes('rbp')) {
+          const addr = dispRbp();
+          if(addr !== null) operand = cpuState.mem[addr] ?? 0;
+        }
+        cpuState.eax = (cpuState.eax * operand) >>> 0;
+        console.log(`📝 MUL eax = ${cpuState.eax}`);
+      }
+  } else if (op==='div' && low.includes('ecx')) {
+      if(cpuState.ecx !== 0) {
+        cpuState.eax = Math.floor(cpuState.eax / cpuState.ecx) >>> 0;
+        cpuState.edx = (cpuState.eax % cpuState.ecx) >>> 0;  // remainder
+        console.log(`📝 DIV eax = ${cpuState.eax}, edx = ${cpuState.edx}`);
+      }
+  } else if (op==='and') {
+      const m=low.match(/and\s+eax,\s*(ecx|edx|0x[0-9a-f]+|\d+)/);
+      if(m) {
+        const operand = m[1]==='ecx' ? cpuState.ecx : 
+                       m[1]==='edx' ? cpuState.edx :
+                       parseInt(m[1], m[1].startsWith('0x')?16:10);
+        cpuState.eax = (cpuState.eax & operand) >>> 0;
+        console.log(`📝 AND eax = ${cpuState.eax}`);
+      }
+  } else if (op==='or') {
+      const m=low.match(/or\s+eax,\s*(ecx|edx|0x[0-9a-f]+|\d+)/);
+      if(m) {
+        const operand = m[1]==='ecx' ? cpuState.ecx : 
+                       m[1]==='edx' ? cpuState.edx :
+                       parseInt(m[1], m[1].startsWith('0x')?16:10);
+        cpuState.eax = (cpuState.eax | operand) >>> 0;
+        console.log(`📝 OR eax = ${cpuState.eax}`);
+      }
+  } else if (op==='xor') {
+      const m=low.match(/xor\s+eax,\s*(ecx|edx|0x[0-9a-f]+|\d+)/);
+      if(m) {
+        const operand = m[1]==='ecx' ? cpuState.ecx : 
+                       m[1]==='edx' ? cpuState.edx :
+                       parseInt(m[1], m[1].startsWith('0x')?16:10);
+        cpuState.eax = (cpuState.eax ^ operand) >>> 0;
+        console.log(`📝 XOR eax = ${cpuState.eax}`);
+      }
+  } else if (op==='shl') {
+      const m=low.match(/shl\s+eax,\s*(\d+|ecx)/);
+      if(m) {
+        const shift = m[1]==='ecx' ? cpuState.ecx : parseInt(m[1], 10);
+        cpuState.eax = (cpuState.eax << shift) >>> 0;
+        console.log(`📝 SHL eax = ${cpuState.eax}`);
+      }
+  } else if (op==='shr') {
+      const m=low.match(/shr\s+eax,\s*(\d+|ecx)/);
+      if(m) {
+        const shift = m[1]==='ecx' ? cpuState.ecx : parseInt(m[1], 10);
+        cpuState.eax = (cpuState.eax >>> shift) >>> 0;
+        console.log(`📝 SHR eax = ${cpuState.eax}`);
+      }
+  }
+
+  /* ── FLAGS from cmp / test ------------------------------- */
+  if (op==='cmp') {
+      const m=low.match(/cmp\s+eax,\s*(0x[0-9a-f]+|\d+|ecx)/);
+      if(m){
+        const rhs = m[1]==='ecx' ? cpuState.ecx
+                                 : parseInt(m[1],
+                                   m[1].startsWith('0x')?16:10);
+        const a   = cpuState.eax>>>0, b = rhs>>>0;
+        const res = (a - b);
+        cpuState.ZF = res === 0;
+        cpuState.SF = res < 0;
+        const signA=(a>>>31)&1, signB=(b>>>31)&1, signR=(res>>>31)&1;
+        cpuState.OF = (signA !== signB) && (signR !== signA);
+        console.log(`🔍 CMP eax(${a}) vs ${b} -> ZF=${cpuState.ZF} SF=${cpuState.SF}`);
+      }
+  }
+  if (op==='test' && low.match(/test\s+eax,\s*eax/)) {
+      cpuState.ZF = cpuState.eax === 0;
+      cpuState.SF = (cpuState.eax>>>31)&1;
+      cpuState.OF = false;
+  }
+
+  /* ── simple prologue / epilogue -------------------------- */
+  if (op==='push' && low.includes('rbp')) {
+      cpuState.rsp -= 8; w64(cpuState.rsp, cpuState.rbp);
+  } else if (op==='mov' && low.includes('rbp, rsp')) {
+      cpuState.rbp = cpuState.rsp;
+  } else if (op==='sub' && low.includes('rsp,')) {
+      const m=low.match(/sub\s+rsp,\s*(0x[0-9a-f]+)/);
+      if(m) cpuState.rsp -= parseInt(m[1],16);
+  } else if (op==='leave') {
+      cpuState.rsp = cpuState.rbp;
+      cpuState.rbp = r64(cpuState.rsp);
+      cpuState.rsp += 8;
+  }
+
+  /* ── CALL ------------------------------------------------- */
+  if (op==='call') {
+      const m=low.match(/call\s+0x([0-9a-f]+)/);
+      if(m){
+        let tgt=parseInt(m[1],16);
+        
+        // Check if this is a printf call (detect by undefined symbol or call pattern)
+        if (!symbolMap[tgt] || tgt === 0x2027) {
+          console.log('📺 Detected printf call, intercepting...');
+          handlePrintf();
+          cpuState.rip = seqNext; // Skip the call, continue to next instruction
+          refreshUI();
+          return;
+        }
+        
+        // Fix TinyCC's incorrect call targets - map to actual function starts
+        // Find which function this target should actually call
+        const actualTarget = Object.entries(symbolMap).find(([name, offset]) => {
+          const funcAddr = textBase + offset;
+          return Math.abs(tgt - funcAddr) > 10; // If target is far from any function start
+        });
+        
+        if (actualTarget) {
+          const [funcName, offset] = actualTarget;
+          const correctTgt = textBase + offset;
+          console.log(`🔧 Fixed CALL target: 0x${tgt.toString(16)} → 0x${correctTgt.toString(16)} (${funcName} function)`);
+          tgt = correctTgt;
+        }
+        
+        cpuState.rsp -= 8; w64(cpuState.rsp, seqNext);
+        (cpuState.stack??=[]).push(cpuState.rsp);
+        cpuState.rip = tgt;  refreshUI();
+        console.log(`📞 CALL 0x${tgt.toString(16)} (ret→0x${seqNext?.toString(16)})`);
+        return;
+      }
+  }
+
+  /* ── RET -------------------------------------------------- */
+  if (op==='ret') {
+      if (!cpuState.stack?.length) {
+        cpuState.rip = undefined;   // program done
+        console.log(`🏁 Program finished`);
+      } else {
+        const sp = cpuState.stack.pop();
+        const ret= r64(sp);
+        delete cpuState.mem[sp]; delete cpuState.mem[sp+4];
+        cpuState.rsp += 8;
+        cpuState.rip = ret;  // Trust the return address, don't check ripToAsmRow
+        console.log(`🔙 RET to 0x${ret?.toString(16)}`);
+      }
+      refreshUI(); return;
+  }
+
+  /* ── CONDITIONAL JUMPS ----------------------------------- */
+  if (op[0]==='j' && op!=='jmp') {
+      const tm = low.match(/0x([0-9a-f]+)/);
+      if (tm) {
+        const tgt = parseInt(tm[1],16);
+        const take =
+           (op==='je' || op==='jz')  ?  cpuState.ZF :
+           (op==='jne'|| op==='jnz') ? !cpuState.ZF :
+           (op==='jg')               ? (!cpuState.ZF && (cpuState.SF===cpuState.OF)) :
+           (op==='jge')              ? (cpuState.SF===cpuState.OF) :
+           (op==='jl')               ? (cpuState.SF!==cpuState.OF) :
+           (op==='jle')              ? (cpuState.ZF || (cpuState.SF!==cpuState.OF)):
+           false;
+
+        cpuState.rip = take ? tgt : seqNext;
+        console.log(`↪ ${op.toUpperCase()} ${take?'taken':'not taken'} → 0x${cpuState.rip?.toString(16)}`);
+        refreshUI(); return;
+      }
+  }
+
+  /* ── unconditional jmp ----------------------------------- */
+  if (op==='jmp') {
+      const m=low.match(/jmp\s+0x([0-9a-f]+)/);
+      if(m) cpuState.rip = parseInt(m[1],16);
+  }
+
+  /* ── default linear advance ------------------------------ */
+  if (cpuState.rip === rip) cpuState.rip = seqNext;
+
+  /* ── UI --------------------------------------------------- */
+  refreshUI();
+
+  /* inner helper – keeps UI calls in one place -------------- */
+  function refreshUI () {
+    updateUI();  // This calls both updateRegs() and updateStack()
+    highlightAsm?.(cpuState.rip);
+    highlightSrc?.(ripToSrcLine[cpuState.rip]);
+  }
+}
+
+
+
+
+/* ───────────── UI helpers (registers + stack) ─────────────── */
+function updateUI(){updateRegs();updateStack();logCpuState();}
+
+function logCpuState(){
+  console.log(`🖥️  CPU STATE: RIP=0x${cpuState.rip?.toString(16)} RSP=0x${cpuState.rsp?.toString(16)} RBP=0x${cpuState.rbp?.toString(16)}`);
+  console.log(`📊 REGISTERS: EAX=${cpuState.eax} ECX=${cpuState.ecx} EDX=${cpuState.edx} RDI=${cpuState.rdi} RSI=${cpuState.rsi}`);
+  console.log(`🚩 FLAGS: ZF=${cpuState.ZF?1:0} SF=${cpuState.SF?1:0} OF=${cpuState.OF?1:0}`);
+  
+  // Log stack contents around RSP
+  if (cpuState.rsp) {
+    const stackVals = [];
+    for (let a = cpuState.rsp + 16; a >= cpuState.rsp - 16; a -= 4) {
+      const val = cpuState.mem[a] !== undefined ? cpuState.mem[a] : '?';
+      const mark = a === cpuState.rsp ? '←RSP' : a === cpuState.rbp ? '←RBP' : '';
+      stackVals.push(`[0x${a.toString(16)}]=${val}${mark}`);
     }
+    console.log(`📚 STACK: ${stackVals.join(' ')}`);
+  }
+}
 
+function updateRegs(){
+  const regBox = document.getElementById('reg-box');
+  if (!regBox) return;
+  
+  regBox.innerHTML = `<strong>Registers</strong><pre>RIP: 0x${cpuState.rip ? cpuState.rip.toString(16) : 'HALTED'}
+RSP: 0x${cpuState.rsp ? cpuState.rsp.toString(16) : '????'}
+RBP: 0x${cpuState.rbp ? cpuState.rbp.toString(16) : '????'}
+EAX: ${cpuState.eax || 0}
+ECX: ${cpuState.ecx || 0}
+EDX: ${cpuState.edx || 0}
+RDI: ${cpuState.rdi || 0}
+RSI: ${cpuState.rsi || 0}
 
-    // ————————————————— Setup CodeMirror editors —————————————————
-    function setupEditors() {
-      editor = CodeMirror.fromTextArea(document.getElementById('editor'), {
-        mode:'text/x-csrc', theme:'dracula', lineNumbers:true
-      });
-      hexEditor = CodeMirror.fromTextArea(document.getElementById('hex-editor'), {
-        mode:'plaintext', theme:'dracula', readOnly:true
-      });
-      asmEditor = CodeMirror.fromTextArea(document.getElementById('asm-editor'), {
-        mode:'plaintext', theme:'dracula', readOnly:true
-      });
-      cpuEditor = CodeMirror.fromTextArea(document.getElementById('cpu-editor'), {
-        mode:'plaintext', theme:'dracula', readOnly:true
-      });
+FLAGS:
+ZF: ${cpuState.ZF ? '1' : '0'}  SF: ${cpuState.SF ? '1' : '0'}  OF: ${cpuState.OF ? '1' : '0'}</pre>`;
+}
 
-      const originalCode = `__attribute__((noinline)) int test(int a, int b) {
-  int x = 4; x++;
-  return a + b;
+function updateStack(){
+  const stackBox = document.getElementById('stack-box');
+  if (!stackBox || !cpuState.rsp) return;
+  
+  const dump = [];
+  const top = cpuState.rsp + 32;    // Show smaller range
+  const bottom = cpuState.rsp - 32;
+  
+  for (let a = top; a >= bottom; a -= 4) {  // Check every 4 bytes for 32-bit values
+    const val = cpuState.mem[a] !== undefined ? cpuState.mem[a] : '?';
+    
+    let mark = '';
+    if (a === cpuState.rsp && a === cpuState.rbp) mark = ' ← RSP, RBP';
+    else if (a === cpuState.rsp) mark = ' ← RSP';
+    else if (a === cpuState.rbp) mark = ' ← RBP';
+    
+    dump.push(`0x${a.toString(16).padStart(4, '0')}: ${val}${mark}`);
+  }
+  
+  stackBox.innerHTML = `<strong>Stack</strong><pre>${dump.join('\n')}</pre>`;
+}
+
+/* printf support --------------------------------------------- */
+function handlePrintf() {
+  try {
+    // Read format string from RDI register (first argument)
+    const formatAddr = cpuState.rdi;
+    const formatString = readStringFromMemory(formatAddr);
+    
+    // Read arguments from RSI, RDX, RCX, etc. (remaining arguments)
+    const args = [cpuState.rsi, cpuState.rdx, cpuState.rcx];
+    
+    // Simple format parsing
+    let output = formatString;
+    let argIndex = 0;
+    
+    // Replace format specifiers
+    output = output.replace(/%d/g, () => args[argIndex++] || 0);
+    output = output.replace(/%x/g, () => (args[argIndex++] || 0).toString(16));
+    output = output.replace(/%s/g, () => {
+      const strAddr = args[argIndex++] || 0;
+      return readStringFromMemory(strAddr);
+    });
+    output = output.replace(/\\n/g, '\n');
+    
+    // Output to console and UI
+    console.log(`📺 PRINTF: ${output}`);
+    displayPrintfOutput(output);
+    
+    // Set return value (number of chars printed)
+    cpuState.eax = output.length;
+    
+  } catch (e) {
+    console.error('Printf error:', e);
+    cpuState.eax = -1;
+  }
+}
+
+function readStringFromMemory(addr) {
+  if (!addr) return "";
+  
+  // For demo purposes, map common string addresses to actual strings
+  // This is a simple workaround since string literals aren't loaded in our memory model
+  const stringMap = {
+    8211: "Hello World!\n",        // First LEA address
+    8237: "The answer is %d\n",    // Second LEA address  
+    8263: "Hex: %x\n",             // Third LEA address
+    8264: "Loop iteration: %d\n"   // Current program's string
+  };
+  
+  if (stringMap[addr]) {
+    return stringMap[addr];
+  }
+  
+  // Try to read from memory (for dynamic strings)
+  let str = '';
+  let i = 0;
+  while (i < 1000 && cpuState.mem[addr + i] !== undefined && cpuState.mem[addr + i] !== 0) {
+    str += String.fromCharCode(cpuState.mem[addr + i]);
+    i++;
+  }
+  return str;
+}
+
+function displayPrintfOutput(text) {
+  // Find or create output display area
+  let outputBox = document.getElementById('printf-output');
+  if (!outputBox) {
+    // Create output box if it doesn't exist
+    const cpuVisual = document.getElementById('cpu-visual');
+    if (cpuVisual) {
+      outputBox = document.createElement('div');
+      outputBox.id = 'printf-output';
+      outputBox.style.cssText = 'background:#44475a; padding:12px; font-family:monospace; color:#f8f8f2; margin-top:12px; border:1px solid #6272a4; max-height:200px; overflow-y:auto;';
+      outputBox.innerHTML = '<strong>Program Output:</strong><pre id="printf-content"></pre>';
+      cpuVisual.appendChild(outputBox);
+    }
+  }
+  
+  // Append to output
+  const content = document.getElementById('printf-content');
+  if (content) {
+    content.textContent += text;
+  }
+}
+
+/* view all functions in disassembly ------------------------- */
+function viewFunctions(){
+  let info = "📋 Function Layout:\n\n";
+  Object.entries(symbolMap).forEach(([name, offset]) => {
+    const addr = textBase + offset;
+    info += `${name}(): 0x${addr.toString(16)} (offset +${offset})\n`;
+  });
+  alert(info + "\n💡 You can see all functions in the disassembly view above!\nDebugging starts at main() and will call other functions as needed.");
+}
+
+/* reset ------------------------------------------------------ */
+function resetStepper(){
+  ripToAsmRow={};instructions=[];symbolMap={};asmEditor.setValue('');hexEditor.setValue('');
+  cpuState={};
+  document.getElementById('reg-box').innerHTML='<strong>Registers</strong>';
+  document.getElementById('stack-box').innerHTML='<strong>Stack</strong>';
+  
+  // Clear printf output
+  const printfContent = document.getElementById('printf-content');
+  if (printfContent) {
+    printfContent.textContent = '';
+  }
+  
+  console.log('🔄 Debugger reset');
+}
+
+/* tiny hex helper ------------------------------------------- */
+function formatHex(buf){
+  let out='';for(let i=0;i<buf.length;i+=16){
+    out+=i.toString(16).padStart(4,'0')+': '+[...buf.slice(i,i+16)].map(b=>b.toString(16).padStart(2,'0')).join(' ')+'\n';
+  }return out;
+}
+
+/* collapsible sections ---------------------------------- */
+function toggleCollapse(header) {
+  const content = header.nextElementSibling;
+  const arrow = header.querySelector('.collapse-arrow');
+  
+  if (content.classList.contains('collapsed')) {
+    content.classList.remove('collapsed');
+    content.style.maxHeight = content.scrollHeight + 'px';
+    arrow.textContent = '▼';
+  } else {
+    content.classList.add('collapsed');
+    content.style.maxHeight = '0px';
+    arrow.textContent = '▶';
+  }
+}
+
+/* load example code -------------------------------------- */
+function loadExample(type) {
+  const examples = {
+    basic: `int main() {
+    int a = 5;
+    int b = 10;
+    int sum = a + b;
+    return sum;
+}`,
+    
+    loop: `int main() {
+    int total = 0;
+    for (int i = 1; i <= 3; i++) {
+        total = total + i;
+    }
+    return total;
+}`,
+    
+    ifelse: `int main() {
+    int x = 7;
+    int result;
+    
+    if (x > 5) {
+        result = 1;
+    } else {
+        result = 0;
+    }
+    
+    return result;
+}`,
+    
+    function: `int add(int a, int b) {
+    return a + b;
 }
 
 int main() {
-  int b = test(3,44);
-  for(int i=0;i<3;i++){
-    b += i;
-  }
-  return b;
-}`
-
-      editor.setValue(originalCode);
-
+    int x = 3;
+    int y = 4;
+    int sum = add(x, y);
+    return sum;
+}`,
     
+    math: `int main() {
+    int a = 8;
+    int b = 3;
+    
+    int sum = a + b;      // 11
+    int diff = a - b;     // 5  
+    int prod = a * b;     // 24
+    
+    return sum + diff;
+}`,
 
+    bitwise: `int main() {
+    int a = 12;   // 1100 in binary
+    int b = 10;   // 1010 in binary
+    
+    int and_result = a & b;  // 8 (1000)
+    int or_result = a | b;   // 14 (1110)
+    int xor_result = a ^ b;  // 6 (0110)
+    
+    return and_result;
+}`,
 
-      createCapstoneModule({
-        print: txt => appendAsm(txt),
-        printErr: txt => console.error(txt)
-      }).then(mod => {
-        capstoneModule = mod;
-        disasmFunc    = capstoneModule.cwrap('disasm_x86', null, ['array','number']);
-        appendAsm('✅ Capstone loaded.');
-      });
-    }
+    multiply: `int main() {
+    int x = 6;
+    int y = 7;
+    int z = 2;
+    
+    int result1 = x * y;     // 42
+    int result2 = result1 * z; // 84
+    
+    return result2;
+}`,
 
-    // ————————————————— Update UI Helpers —————————————————
-    function updateRegisters() {
-      const r = cpuState;
-      const s = `RIP: 0x${r.rip.toString(16)}
-RSP: 0x${r.rsp.toString(16)}
-RBP: 0x${r.rbp.toString(16)}`;
-      document.getElementById('reg-box')
-              .innerHTML = `<strong>Registers</strong><pre>${s}</pre>`;
-    }
-    function updateStack() {
-      const lines = cpuState.stack.map((v,i)=>
-        `0x${(cpuState.rsp + i*8).toString(16).padStart(8,'0')}: 0x${v.toString(16).padStart(16,'0')}`
-      );
-      document.getElementById('stack-box')
-              .innerHTML = `<strong>Stack</strong><pre>${lines.join('\n')}</pre>`;
-      cpuEditor.setValue(cpuEditor.getValue() + lines.join('\n') + '\n\n');
-      cpuEditor.scrollTo(null, cpuEditor.getScrollInfo().height);
-    }
+    division: `int main() {
+    int dividend = 20;
+    int divisor = 3;
+    
+    int quotient = dividend / divisor;   // 6
+    int remainder = dividend % divisor;  // 2
+    
+    return quotient;
+}`,
 
-    // ————————————————— Compile & Disasm —————————————————
-    async function compileAndDisasm() {
-      asmEditor.setValue('');
-      ripToAsmRow = {}; ripToSrcLine = {};
-      instructions = []; instIndex = 0;
+    shifting: `int main() {
+    int value = 5;           // 101 in binary
+    
+    int left_shift = value << 2;   // 20 (10100)
+    int right_shift = value >> 1;  // 2 (10)
+    
+    return left_shift;
+}`,
 
-      tccModule = await createTCC();
-      // tccModule.FS.writeFile('in.c', editor.getValue());
-      const rawCode = editor.getValue();
-      const instrumentedCode = injectLineMarkers(rawCode);
-      tccModule.FS.writeFile('in.c', instrumentedCode);
-
-      const lenPtr = tccModule._malloc(4),
-            ptr    = tccModule.cwrap('compile_and_get_text','number',['string','number'])('in.c', lenPtr),
-            size   = tccModule.HEAP32[lenPtr>>2];
-      tccModule._free(lenPtr);
-
-      codeBytes = new Uint8Array(tccModule.HEAPU8.buffer, ptr, size);
-      hexEditor.setValue(formatHex(codeBytes) + '\n✅ Compiled');
-
-      // extract symbols
-      try {
-        const js   = tccModule.cwrap('extract_symbols','string',['string'])('out.o'),
-              sym  = JSON.parse(js,(k,v)=> /^\d+$/.test(v)?Number(v):v);
-        window.symbolMap = {};
-        for (let [n,o] of Object.entries(sym))
-          window.symbolMap[n] = textBase + o;
-      } catch {}
-
-      // run Capstone
-      disasmFunc(codeBytes, codeBytes.length);
-      setTimeout(() => {
-        buildInstList();
-        extractRipToSourceMap();  // <—— HERE
-      }, 10);
-
-      setTimeout(buildInstList, 10);
-    }
-
-    function appendAsm(line) {
-      line = line.trim();
-      const cur = asmEditor.getValue().split('\n');
-      if (cur.includes(line)) return;
-
-      const m = line.match(/^0x([0-9a-f]+):/);
-      if (m && window.symbolMap) {
-        const addr = parseInt(m[1],16);
-        for (const [lbl,ad] of Object.entries(window.symbolMap)) {
-          if (ad===addr && !cur.includes(lbl+':')) {
-            cur.push(lbl+':');
-            break;
-          }
-        }
-      }
-      if (m) {
-        const addr = parseInt(m[1],16), row = cur.length;
-        ripToAsmRow[addr] = row;
-        if (currentSourceLine!=null) ripToSrcLine[addr] = currentSourceLine;
-      }
-      if (/^[A-Za-z_]\w*:$/.test(line)) {
-        const lbl = line.slice(0,-1);
-        if (lbl==='test')  currentSourceLine=2;
-        if (lbl==='main')  currentSourceLine=7;
-      }
-      cur.push(line);
-      asmEditor.setValue(cur.join('\n'));
-      asmEditor.scrollTo(null, asmEditor.getScrollInfo().height);
-    }
-
-    function extractRipToSourceMap() {
-      ripToSrcLine = {};
-      const lines = asmEditor.getValue().split('\n');
-
-      for (const line of lines) {
-        const match = line.match(/^0x([0-9a-f]+):\s+nop\s+dword ptr \[rax \+ 0x([0-9a-f]+)\]/i);
-        if (match) {
-          const rip = parseInt(match[1], 16);
-          const lineNum = parseInt(match[2], 16);
-          if (!isNaN(lineNum)) {
-            ripToSrcLine[rip] = lineNum;
-          }
-        }
-      }
-
-      console.log('✅ ripToSrcLine:', ripToSrcLine);
-    }
-
-
-
-
-
-    function buildInstList() {
-      instructions = Object.keys(ripToAsmRow)
-                           .map(x=>parseInt(x,10))
-                           .sort((a,b)=>a-b);
-      instIndex = 0;
-    }
-
-    function debugInit() {
-      if (!instructions.length || !window.symbolMap?.main) {
-        return alert('Compile & Disasm first (and ensure main() exists).');
-      }
-
-      const mainRip = window.symbolMap.main;
-      instIndex = instructions.findIndex(addr => addr >= mainRip);
-      if (instIndex === -1) instIndex = 0;
-
-      cpuState = {
-        rip: instructions[instIndex],
-        rsp: 0x8000,
-        rbp: 0x8000,
-        stack: []
-      };
-
-      updateRegisters(); updateStack();
-      highlightAsm(cpuState.rip);
-      highlightSrc(ripToSrcLine[cpuState.rip]);
-    }
-
-
-
-    function step() {
-      if (instIndex >= instructions.length) {
-        console.log("✅ Execution finished.");
-        return;
-      }
-
-      let rip = cpuState.rip;
-      let nextIndex = instructions.indexOf(rip) + 1;
-      const nextRip = instructions[nextIndex];
-      const line = asmEditor.getLine(ripToAsmRow[rip] || 0) || '';
-
-      console.log(`\n▶ STEP at 0x${rip.toString(16)}: ${line.trim()}`);
-      let logAction = '';
-
-      const isCall = line.includes('call') && line.includes('0x');
-      const isRet  = line.startsWith('0x') && line.includes(':	ret');
-
-      if (isCall) {
-        const targetHex = line.match(/call\s+0x([0-9a-f]+)/i);
-        if (targetHex) {
-          const targetRip = parseInt(targetHex[1], 16);
-          cpuState.stack.push(nextRip); // simulate return address
-          cpuState.rip = targetRip;
-          logAction = `CALL → Jumping to 0x${targetRip.toString(16)}, pushed return addr 0x${nextRip.toString(16)}`;
-        }
-      } else if (isRet) {
-        const returnRip = cpuState.stack.pop();
-        if (returnRip == null) {
-          console.log("🔚 RET → stack is empty, program has returned.");
-          cpuState.rip = undefined;
-          instIndex = instructions.length;
-          return;
-        } else {
-          cpuState.rip = returnRip;
-          logAction = `RET → Returning to 0x${returnRip.toString(16)}, stack pop`;
-        }
-
-      } else {
-        cpuState.rip = nextRip;
-        logAction = `Linear → Moving to 0x${nextRip?.toString(16) || '??'}`;
-      }
-
-      console.log(logAction);
-      console.log(`Stack: [${cpuState.stack.map(x => '0x' + x.toString(16)).join(', ')}]`);
-
-      updateRegisters(); updateStack();
-      highlightAsm(cpuState.rip);
-      highlightSrc(ripToSrcLine[cpuState.rip]);
-
-      instIndex = instructions.indexOf(cpuState.rip);
-    }
-
-
-
-
-    // ————————————————— Reset Entire UI —————————————————
-    function resetStepper() {
-      emuHandle = 0;
-      instIndex = 0;
-      ripToAsmRow = {}; ripToSrcLine = {}; currentSourceLine = null;
-      codeBytes = null;
-      instructions = [];
-
-      asmEditor.setValue('');
-      hexEditor.setValue('');
-      cpuEditor.setValue('');
-      editor.getAllMarks().forEach(m=>m.clear());
-
-      cpuState = { rip:textBase, rsp:0x8000, rbp:0x8000, stack:[] };
-      document.getElementById('reg-box').innerHTML = '<strong>Registers</strong>';
-      document.getElementById('stack-box').innerHTML = '<strong>Stack</strong>';
-    }
-
-    // ————————————————— Source/ASM Highlight Helpers —————————————————
-    function highlightAsm(rip) {
-      const row = ripToAsmRow[rip];
-      asmEditor.operation(()=>{
-        asmEditor.getAllMarks().forEach(m=>m.clear());
-        if (row!=null) asmEditor.addLineClass(row,'background','step-highlight');
-        asmEditor.scrollIntoView({line:row,ch:0});
-      });
-    }
-    function highlightSrc(line) {
-      editor.operation(()=>{
-        editor.getAllMarks().forEach(m=>m.clear());
-        if (line!=null) editor.addLineClass(line-1,'background','step-highlight');
-        if (line!=null) editor.scrollIntoView({line:line-1,ch:0});
-      });
-    }
-
-    // ————————————————— Hex Formatter —————————————————
-    function formatHex(buf) {
-      let out = '';
-      for (let i=0; i<buf.length; i+=16) {
-        const chunk = [...buf.slice(i,i+16)]
-          .map(b=>b.toString(16).padStart(2,'0')).join(' ');
-        out += i.toString(16).padStart(4,'0') + ': ' + chunk + '\n';
-      }
-      return out;
-    }
-  </script>
+    complex: `int main() {
+    int a = 15;
+    int b = 4;
+    
+    // Complex expression
+    int result = ((a + b) * 2) - (a / b);
+    // = ((15+4) * 2) - (15/4)
+    // = (19 * 2) - 3
+    // = 38 - 3 = 35
+    
+    return result;
+}`
+  };
+  
+  if (examples[type]) {
+    editor.setValue(examples[type]);
+    resetStepper(); // Clear previous state
+  }
+}
+</script>
 </body>
 </html>
